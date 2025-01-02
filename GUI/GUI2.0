@@ -1,0 +1,73 @@
+import sys
+from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QFileDialog, QLabel, QVBoxLayout, QWidget, QFontDialog
+from PyQt5.QtCore import Qt
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.initUI()
+
+    def initUI(self):
+        self.setWindowTitle('数据备份软件')
+        self.setGeometry(100, 100, 800, 600)
+
+        # 创建菜单栏
+        menubar = self.menuBar()
+
+        # 创建菜单
+        fileMenu = menubar.addMenu('文件')
+        supportMenu = menubar.addMenu('文件类型支持')
+        packageMenu = menubar.addMenu('打包和解包')
+        scheduleMenu = menubar.addMenu('定时备份')
+
+        # 创建菜单项
+        selectDesktopFileAction = QAction('选择桌面文件', self)
+        exitAction = QAction('退出', self)
+        settingsAction = QAction('设置', self)
+        supportAction = QAction('文件类型支持', self)
+        metadataAction = QAction('元数据支持', self)
+        customBackupAction = QAction('自定义备份', self)
+        packageAction = QAction('打包和解包', self)
+        compressAction = QAction('压缩和解压', self)
+        encryptAction = QAction('加密解密', self)
+        scheduleAction = QAction('定时备份', self)
+        realtimeAction = QAction('实时备份', self)
+        networkAction = QAction('网络备份', self)
+
+        # 添加菜单项到菜单
+        fileMenu.addAction(selectDesktopFileAction)
+        fileMenu.addAction(exitAction)
+        fileMenu.addAction(settingsAction)
+
+        # 连接菜单项的信号到槽函数
+        selectDesktopFileAction.triggered.connect(self.selectDesktopFile)
+        exitAction.triggered.connect(self.close)
+        settingsAction.triggered.connect(self.openFontDialog)
+
+        # 设置默认显示的消息
+        self.welcome_label = QLabel('欢迎使用XXX数据备份软件', self)
+        self.welcome_label.setAlignment(Qt.AlignCenter)
+
+        # 设置布局
+        central_widget = QWidget(self)
+        layout = QVBoxLayout(central_widget)
+        layout.addWidget(self.welcome_label)
+        self.setCentralWidget(central_widget)
+
+    def selectDesktopFile(self):
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        fileName, _ = QFileDialog.getOpenFileName(self, "选择桌面文件", "C:/Users/cwj_0810/Desktop", "所有文件 (*);;文本文件 (*.txt)", options=options)
+        if fileName:
+            print(f"选择的文件: {fileName}")
+
+    def openFontDialog(self):
+        font, ok = QFontDialog.getFont()
+        if ok:
+            self.welcome_label.setFont(font)
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    mainWin = MainWindow()
+    mainWin.show()
+    sys.exit(app.exec_())

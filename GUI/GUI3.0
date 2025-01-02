@@ -1,0 +1,420 @@
+import sys
+from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QFileDialog, QLabel, QVBoxLayout, QWidget, QFontDialog, QLineEdit, QPushButton, QHBoxLayout, QComboBox, QFormLayout, QDateTimeEdit, QSpinBox, QStyleFactory
+from PyQt5.QtCore import Qt, QDateTime
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.initUI()
+
+    def initUI(self):
+        self.setWindowTitle('数据备份软件')
+        self.resize(800, 600)
+        self.center()
+
+        # 设置全局样式
+        QApplication.setStyle(QStyleFactory.create('Fusion'))
+        self.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+            }
+            QLineEdit, QComboBox, QDateTimeEdit, QSpinBox {
+                font-size: 14px;
+                padding: 5px;
+            }
+            QPushButton {
+                font-size: 14px;
+                padding: 5px 10px;
+            }
+        """)
+
+        # 创建菜单栏
+        menubar = self.menuBar()
+
+        # 创建菜单
+        fileMenu = menubar.addMenu('文件')
+        backupRestoreMenu = menubar.addMenu('备份还原')
+        packageMenu = menubar.addMenu('打包解包')
+        compressMenu = menubar.addMenu('压缩解压')
+        encryptMenu = menubar.addMenu('加密解密')
+
+        # 创建菜单项
+        settingsAction = QAction('设置', self)
+        exitAction = QAction('退出', self)
+        backupRestoreAction = QAction('备份/还原', self)
+        packageAction = QAction('打包/解包', self)
+        compressAction = QAction('压缩/解压', self)
+        encryptAction = QAction('加密/解密', self)
+
+        # 添加菜单项到菜单
+        fileMenu.addAction(settingsAction)
+        fileMenu.addAction(exitAction)
+        backupRestoreMenu.addAction(backupRestoreAction)
+        packageMenu.addAction(packageAction)
+        compressMenu.addAction(compressAction)
+        encryptMenu.addAction(encryptAction)
+
+        # 连接菜单项的信号到槽函数
+        settingsAction.triggered.connect(self.openFontDialog)
+        exitAction.triggered.connect(self.close)
+        backupRestoreAction.triggered.connect(self.showBackupRestorePage)
+        packageAction.triggered.connect(self.showPackagePage)
+        compressAction.triggered.connect(self.showCompressPage)
+        encryptAction.triggered.connect(self.showEncryptPage)
+
+        # 设置默认显示的消息
+        self.welcome_label = QLabel('欢迎使用XXX数据备份软件', self)
+        self.welcome_label.setAlignment(Qt.AlignCenter)
+        self.welcome_label.setStyleSheet("font-size: 18px; padding: 20px;")
+
+        # 设置布局
+        self.central_widget = QWidget(self)
+        self.layout = QVBoxLayout(self.central_widget)
+        self.layout.addWidget(self.welcome_label)
+        self.setCentralWidget(self.central_widget)
+
+        # 创建独立的页面布局
+        self.backupRestoreWidget = QWidget()
+        self.packageWidget = QWidget()
+        self.compressWidget = QWidget()
+        self.encryptWidget = QWidget()
+
+    def center(self):
+        qr = self.frameGeometry()
+        cp = QApplication.desktop().availableGeometry().center()
+        qr.moveCenter(cp)
+        self.move(qr.topLeft())
+
+    def openFontDialog(self):
+        font, ok = QFontDialog.getFont()
+        if ok:
+            self.welcome_label.setFont(font)
+
+    def showBackupRestorePage(self):
+        self.clearLayout(self.backupRestoreWidget)
+        self.setWindowTitle('备份/还原')
+
+        layout = QVBoxLayout(self.backupRestoreWidget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # 创建备份部分
+        backupLabel = QLabel('备份:', self.backupRestoreWidget)
+        selectBackupFileButton = QPushButton('选择文件', self.backupRestoreWidget)
+        selectBackupFileButton.setFixedWidth(100)
+        selectBackupFileButton.clicked.connect(self.selectBackupFile)
+        self.backupFilePath = QLineEdit(self.backupRestoreWidget)
+        self.backupFilePath.setReadOnly(True)
+        self.backupFilePath.setFixedWidth(300)
+
+        backupLayout = QHBoxLayout()
+        backupLayout.addWidget(backupLabel)
+        backupLayout.addWidget(self.backupFilePath)
+        backupLayout.addWidget(selectBackupFileButton)
+        backupLayout.addStretch(1)
+
+        # 创建文件类型支持部分
+        fileTypeLabel = QLabel('文件类型支持:', self.backupRestoreWidget)
+        self.fileTypeComboBox = QComboBox(self.backupRestoreWidget)
+        self.fileTypeComboBox.addItems(['管道', '软链接', '硬链接'])
+
+        fileTypeLayout = QHBoxLayout()
+        fileTypeLayout.addWidget(fileTypeLabel)
+        fileTypeLayout.addWidget(self.fileTypeComboBox)
+        fileTypeLayout.addStretch(1)
+
+        # 创建元数据支持部分
+        metadataLabel = QLabel('元数据支持:', self.backupRestoreWidget)
+        self.metadataComboBox = QComboBox(self.backupRestoreWidget)
+        self.metadataComboBox.addItems(['属主', '时间', '权限'])
+
+        metadataLayout = QHBoxLayout()
+        metadataLayout.addWidget(metadataLabel)
+        metadataLayout.addWidget(self.metadataComboBox)
+        metadataLayout.addStretch(1)
+
+        # 创建还原部分
+        restoreLabel = QLabel('还原:', self.backupRestoreWidget)
+        selectRestoreFileButton = QPushButton('选择文件', self.backupRestoreWidget)
+        selectRestoreFileButton.setFixedWidth(100)
+        selectRestoreFileButton.clicked.connect(self.selectRestoreFile)
+        self.restoreFilePath = QLineEdit(self.backupRestoreWidget)
+        self.restoreFilePath.setReadOnly(True)
+        self.restoreFilePath.setFixedWidth(300)
+
+        restoreLayout = QHBoxLayout()
+        restoreLayout.addWidget(restoreLabel)
+        restoreLayout.addWidget(self.restoreFilePath)
+        restoreLayout.addWidget(selectRestoreFileButton)
+        restoreLayout.addStretch(1)
+
+        # 创建自定义备份部分
+        customBackupLabel = QLabel('自定义备份:', self.backupRestoreWidget)
+        pathLabel = QLabel('路径:', self.backupRestoreWidget)
+        self.pathEdit = QLineEdit(self.backupRestoreWidget)
+        typeLabel = QLabel('类型:', self.backupRestoreWidget)
+        self.typeComboBox = QComboBox(self.backupRestoreWidget)
+        self.typeComboBox.addItems(['所有文件', '文本文件', '图片文件', '视频文件'])
+        nameLabel = QLabel('名字:', self.backupRestoreWidget)
+        self.nameEdit = QLineEdit(self.backupRestoreWidget)
+        timeLabel = QLabel('时间:', self.backupRestoreWidget)
+        self.timeEdit = QDateTimeEdit(self.backupRestoreWidget)
+        self.timeEdit.setCalendarPopup(True)
+        self.timeEdit.setDateTime(QDateTime.currentDateTime())
+        sizeLabel = QLabel('尺寸(字节):', self.backupRestoreWidget)
+        self.sizeEdit = QSpinBox(self.backupRestoreWidget)
+        self.sizeEdit.setMaximum(1000000000)
+
+        customBackupLayout = QFormLayout()
+        customBackupLayout.addRow(customBackupLabel)
+        customBackupLayout.addRow(pathLabel, self.pathEdit)
+        customBackupLayout.addRow(typeLabel, self.typeComboBox)
+        customBackupLayout.addRow(nameLabel, self.nameEdit)
+        customBackupLayout.addRow(timeLabel, self.timeEdit)
+        customBackupLayout.addRow(sizeLabel, self.sizeEdit)
+
+        # 添加组件到布局
+        layout.addLayout(backupLayout)
+        layout.addLayout(fileTypeLayout)
+        layout.addLayout(metadataLayout)
+        layout.addLayout(restoreLayout)
+        layout.addLayout(customBackupLayout)
+
+        self.setCentralWidget(self.backupRestoreWidget)
+
+    def showPackagePage(self):
+        self.clearLayout(self.packageWidget)
+        self.setWindowTitle('打包/解包')
+
+        layout = QVBoxLayout(self.packageWidget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # 创建打包部分
+        packageLabel = QLabel('打包:', self.packageWidget)
+        selectPackageFileButton = QPushButton('选择文件', self.packageWidget)
+        selectPackageFileButton.setFixedWidth(100)
+        selectPackageFileButton.clicked.connect(self.selectPackageFile)
+        self.packageFilePath = QLineEdit(self.packageWidget)
+        self.packageFilePath.setReadOnly(True)
+        self.packageFilePath.setFixedWidth(300)
+
+        packageLayout = QHBoxLayout()
+        packageLayout.addWidget(packageLabel)
+        packageLayout.addWidget(self.packageFilePath)
+        packageLayout.addWidget(selectPackageFileButton)
+        packageLayout.addStretch(1)
+
+        # 创建解包部分
+        unpackLabel = QLabel('解包:', self.packageWidget)
+        selectUnpackFileButton = QPushButton('选择文件', self.packageWidget)
+        selectUnpackFileButton.setFixedWidth(100)
+        selectUnpackFileButton.clicked.connect(self.selectUnpackFile)
+        self.unpackFilePath = QLineEdit(self.packageWidget)
+        self.unpackFilePath.setReadOnly(True)
+        self.unpackFilePath.setFixedWidth(300)
+
+        unpackLayout = QHBoxLayout()
+        unpackLayout.addWidget(unpackLabel)
+        unpackLayout.addWidget(self.unpackFilePath)
+        unpackLayout.addWidget(selectUnpackFileButton)
+        unpackLayout.addStretch(1)
+
+        # 添加组件到布局
+        layout.addLayout(packageLayout)
+        layout.addLayout(unpackLayout)
+
+        self.setCentralWidget(self.packageWidget)
+
+    def showCompressPage(self):
+        self.clearLayout(self.compressWidget)
+        self.setWindowTitle('压缩/解压')
+
+        layout = QVBoxLayout(self.compressWidget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # 创建压缩部分
+        compressLabel = QLabel('压缩:', self.compressWidget)
+        selectCompressFileButton = QPushButton('选择文件', self.compressWidget)
+        selectCompressFileButton.setFixedWidth(100)
+        selectCompressFileButton.clicked.connect(self.selectCompressFile)
+        self.compressFilePath = QLineEdit(self.compressWidget)
+        self.compressFilePath.setReadOnly(True)
+        self.compressFilePath.setFixedWidth(300)
+
+        compressLayout = QHBoxLayout()
+        compressLayout.addWidget(compressLabel)
+        compressLayout.addWidget(self.compressFilePath)
+        compressLayout.addWidget(selectCompressFileButton)
+        compressLayout.addStretch(1)
+
+        # 创建压缩解压算法选择部分
+        algorithmLabel = QLabel('压缩解压算法:', self.compressWidget)
+        self.algorithmComboBox = QComboBox(self.compressWidget)
+        self.algorithmComboBox.addItems(['Huffman', 'LZ77'])
+
+        algorithmLayout = QHBoxLayout()
+        algorithmLayout.addWidget(algorithmLabel)
+        algorithmLayout.addWidget(self.algorithmComboBox)
+        algorithmLayout.addStretch(1)
+
+        # 创建解压部分
+        decompressLabel = QLabel('解压:', self.compressWidget)
+        selectDecompressFileButton = QPushButton('选择文件', self.compressWidget)
+        selectDecompressFileButton.setFixedWidth(100)
+        selectDecompressFileButton.clicked.connect(self.selectDecompressFile)
+        self.decompressFilePath = QLineEdit(self.compressWidget)
+        self.decompressFilePath.setReadOnly(True)
+        self.decompressFilePath.setFixedWidth(300)
+
+        decompressLayout = QHBoxLayout()
+        decompressLayout.addWidget(decompressLabel)
+        decompressLayout.addWidget(self.decompressFilePath)
+        decompressLayout.addWidget(selectDecompressFileButton)
+        decompressLayout.addStretch(1)
+
+        # 添加组件到布局
+        layout.addLayout(compressLayout)
+        layout.addLayout(algorithmLayout)
+        layout.addLayout(decompressLayout)
+
+        self.setCentralWidget(self.compressWidget)
+
+    def showEncryptPage(self):
+        self.clearLayout(self.encryptWidget)
+        self.setWindowTitle('加密/解密')
+
+        layout = QVBoxLayout(self.encryptWidget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # 创建加密部分
+        encryptLabel = QLabel('加密:', self.encryptWidget)
+        selectEncryptFileButton = QPushButton('选择文件', self.encryptWidget)
+        selectEncryptFileButton.setFixedWidth(100)
+        selectEncryptFileButton.clicked.connect(self.selectEncryptFile)
+        self.encryptFilePath = QLineEdit(self.encryptWidget)
+        self.encryptFilePath.setReadOnly(True)
+        self.encryptFilePath.setFixedWidth(300)
+
+        encryptLayout = QHBoxLayout()
+        encryptLayout.addWidget(encryptLabel)
+        encryptLayout.addWidget(self.encryptFilePath)
+        encryptLayout.addWidget(selectEncryptFileButton)
+        encryptLayout.addStretch(1)
+
+        # 创建加密解密算法选择部分
+        algorithmLabel = QLabel('加密解密算法:', self.encryptWidget)
+        self.algorithmComboBox = QComboBox(self.encryptWidget)
+        self.algorithmComboBox.addItems(['MD5', 'SHA1', 'DES', 'AES'])
+
+        algorithmLayout = QHBoxLayout()
+        algorithmLayout.addWidget(algorithmLabel)
+        algorithmLayout.addWidget(self.algorithmComboBox)
+        algorithmLayout.addStretch(1)
+
+        # 创建用户指定密码部分
+        passwordLabel = QLabel('密码:', self.encryptWidget)
+        self.passwordEdit = QLineEdit(self.encryptWidget)
+        self.passwordEdit.setEchoMode(QLineEdit.Password)
+
+        passwordLayout = QHBoxLayout()
+        passwordLayout.addWidget(passwordLabel)
+        passwordLayout.addWidget(self.passwordEdit)
+        passwordLayout.addStretch(1)
+
+        # 创建解密部分
+        decryptLabel = QLabel('解密:', self.encryptWidget)
+        selectDecryptFileButton = QPushButton('选择文件', self.encryptWidget)
+        selectDecryptFileButton.setFixedWidth(100)
+        selectDecryptFileButton.clicked.connect(self.selectDecryptFile)
+        self.decryptFilePath = QLineEdit(self.encryptWidget)
+        self.decryptFilePath.setReadOnly(True)
+        self.decryptFilePath.setFixedWidth(300)
+
+        decryptLayout = QHBoxLayout()
+        decryptLayout.addWidget(decryptLabel)
+        decryptLayout.addWidget(self.decryptFilePath)
+        decryptLayout.addWidget(selectDecryptFileButton)
+        decryptLayout.addStretch(1)
+
+        # 添加组件到布局
+        layout.addLayout(encryptLayout)
+        layout.addLayout(algorithmLayout)
+        layout.addLayout(passwordLayout)
+        layout.addLayout(decryptLayout)
+
+        self.setCentralWidget(self.encryptWidget)
+
+    def selectBackupFile(self):
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        fileName, _ = QFileDialog.getOpenFileName(self, "选择文件", "", "所有文件 (*);;文本文件 (*.txt)", options=options)
+        if fileName:
+            self.backupFilePath.setText(fileName)
+
+    def selectRestoreFile(self):
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        fileName, _ = QFileDialog.getOpenFileName(self, "选择文件", "", "所有文件 (*);;文本文件 (*.txt)", options=options)
+        if fileName:
+            self.restoreFilePath.setText(fileName)
+
+    def selectPackageFile(self):
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        fileName, _ = QFileDialog.getOpenFileName(self, "选择文件", "", "所有文件 (*);;文本文件 (*.txt)", options=options)
+        if fileName:
+            self.packageFilePath.setText(fileName)
+
+    def selectUnpackFile(self):
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        fileName, _ = QFileDialog.getOpenFileName(self, "选择文件", "", "所有文件 (*);;文本文件 (*.txt)", options=options)
+        if fileName:
+            self.unpackFilePath.setText(fileName)
+
+    def selectCompressFile(self):
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        fileName, _ = QFileDialog.getOpenFileName(self, "选择文件", "", "所有文件 (*);;文本文件 (*.txt)", options=options)
+        if fileName:
+            self.compressFilePath.setText(fileName)
+
+    def selectDecompressFile(self):
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        fileName, _ = QFileDialog.getOpenFileName(self, "选择文件", "", "所有文件 (*);;文本文件 (*.txt)", options=options)
+        if fileName:
+            self.decompressFilePath.setText(fileName)
+
+    def selectEncryptFile(self):
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        fileName, _ = QFileDialog.getOpenFileName(self, "选择文件", "", "所有文件 (*);;文本文件 (*.txt)", options=options)
+        if fileName:
+            self.encryptFilePath.setText(fileName)
+
+    def selectDecryptFile(self):
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        fileName, _ = QFileDialog.getOpenFileName(self, "选择文件", "", "所有文件 (*);;文本文件 (*.txt)", options=options)
+        if fileName:
+            self.decryptFilePath.setText(fileName)
+
+    def clearLayout(self, widget):
+        layout = widget.layout()
+        if layout is not None:
+            while layout.count():
+                child = layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+                elif child.spacerItem():
+                    child.spacerItem().changeSize(0, 0)
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    mainWin = MainWindow()
+    mainWin.show()
+    sys.exit(app.exec_())
