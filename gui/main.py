@@ -8,6 +8,22 @@ from PyQt5.QtWidgets import (
     QListView, QAbstractItemView, QListWidget
 )
 from PyQt5.QtCore import Qt, QDateTime, QThread, pyqtSignal
+
+# 添加运行时路径处理
+if getattr(sys, 'frozen', False):
+    # PyInstaller打包环境
+    bundle_dir = sys._MEIPASS
+else:
+    # 开发环境
+    bundle_dir = os.path.dirname(os.path.abspath(__file__))
+
+# 确保.so库可以被找到
+if os.path.exists(os.path.join(bundle_dir, 'byte_enclave_python.cpython-310-x86_64-linux-gnu.so')):
+    sys.path.append(bundle_dir)
+elif os.path.exists(os.path.join(bundle_dir, 'lib')):
+    sys.path.append(os.path.join(bundle_dir, 'lib'))
+
+# 导入模块
 import byte_enclave_python
 
 class BackupThread(QThread):
