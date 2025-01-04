@@ -3,6 +3,7 @@
 #include <vector>
 #include <algorithm>
 #include <fstream>
+#include <iostream>
 
 namespace fs = std::filesystem;
 
@@ -154,7 +155,8 @@ bool BackupManager::restore(const fs::path& backup_path,
 }
 
 std::vector<fs::path> BackupManager::listBackupContents(
-    const fs::path& backup_path) {
+    const fs::path& backup_path,
+    const BackupOptions& options) {
     std::vector<fs::path> contents;
     
     try {
@@ -169,7 +171,13 @@ std::vector<fs::path> BackupManager::listBackupContents(
 
         try {
             // 解密和解压文件
-            if (!encryptor_->decrypt(backup_path, temp_decrypted, "")) {
+            if (!options.password.empty()) {
+                if (!encryptor_->decrypt(backup_path, temp_decrypted, options.password)) {
+                    cleanup();
+                    return contents;
+                }
+            } else {
+                // 如果没有密码，直接复制文件
                 fs::copy_file(backup_path, temp_decrypted);
             }
             
@@ -196,7 +204,7 @@ std::vector<fs::path> BackupManager::listBackupContents(
     return contents;
 }
 
-bool BackupManager::verifyBackup(const fs::path& backup_path) {
+bool BackupManager::verifyBackup(const fs::path& backup_path, const BackupOptions& options) {
     try {
         // 创建临时文件
         auto temp_decrypted = backup_path.string() + ".dec.tmp";
@@ -209,24 +217,45 @@ bool BackupManager::verifyBackup(const fs::path& backup_path) {
 
         try {
             // 解密和解压文件
-            if (!encryptor_->decrypt(backup_path, temp_decrypted, "")) {
+            if (!options.password.empty()) {
+                std::cout << "[DEBUG] 使用密码进行解密: " << (options.password.empty() ? "empty" : "set") << std::endl;
+                if (!encryptor_->decrypt(backup_path, temp_decrypted, options.password)) {
+                    std::cout << "[DEBUG] 解密失败" << std::endl;
+                    cleanup();
+                    return false;
+                }
+                std::cout << "[DEBUG] 解密成功" << std::endl;
+            } else {
+                // 如果没有密码，直接复制文件
+                std::cout << "[DEBUG] 无密码，直接复制文件" << std::endl;
                 fs::copy_file(backup_path, temp_decrypted);
             }
             
+            std::cout << "[DEBUG] 开始解压文件" << std::endl;
             if (!compressor_->decompress(temp_decrypted, temp_decompressed)) {
+                std::cout << "[DEBUG] 解压失败" << std::endl;
                 cleanup();
                 return false;
             }
+            std::cout << "[DEBUG] 解压成功" << std::endl;
 
             // 验证文件完整性
+            std::cout << "[DEBUG] 开始验证校验和" << std::endl;
             bool result = packer_->verifyChecksum(temp_decompressed);
+            std::cout << "[DEBUG] 校验和验证结果: " << std::boolalpha << result << std::endl;
             cleanup();
             return result;
+        } catch (const std::exception& e) {
+            std::cout << "[DEBUG] 异常: " << e.what() << std::endl;
+            cleanup();
+            return false;
         } catch (...) {
+            std::cout << "[DEBUG] 未知异常" << std::endl;
             cleanup();
             return false;
         }
     } catch (...) {
+        std::cout << "[DEBUG] 外层未知异常" << std::endl;
         return false;
     }
 }

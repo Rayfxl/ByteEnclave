@@ -2,14 +2,18 @@
 #include <fstream>
 #include <stdexcept>
 #include <cstring>
+#include <iostream>
 
 namespace byte_enclave {
 
 bool Compressor::compress(const std::string& input_path, const std::string& output_path) {
     try {
+        std::cout << "[COMPRESS] 开始压缩文件: " << input_path << std::endl;
+        
         // 读取输入文件
         std::ifstream input(input_path, std::ios::binary);
         if (!input) {
+            std::cout << "[COMPRESS] 无法打开输入文件" << std::endl;
             return false;
         }
 
@@ -19,18 +23,24 @@ bool Compressor::compress(const std::string& input_path, const std::string& outp
         );
         input.close();
 
+        std::cout << "[COMPRESS] 读取输入文件大小: " << data.size() << " bytes" << std::endl;
+
         // 空文件特殊处理
         if (data.empty()) {
+            std::cout << "[COMPRESS] 空文件，直接创建空输出" << std::endl;
             std::ofstream output(output_path, std::ios::binary);
             return output.good();
         }
 
         // 使用LZ77压缩
+        std::cout << "[COMPRESS] 开始LZ77压缩" << std::endl;
         auto matches = lz77_compress(data);
+        std::cout << "[COMPRESS] LZ77压缩完成，匹配数量: " << matches.size() << std::endl;
 
         // 写入压缩文件
         std::ofstream output(output_path, std::ios::binary);
         if (!output) {
+            std::cout << "[COMPRESS] 无法创建输出文件" << std::endl;
             return false;
         }
 
@@ -47,22 +57,31 @@ bool Compressor::compress(const std::string& input_path, const std::string& outp
             output.write(reinterpret_cast<const char*>(&match.next_char), sizeof(match.next_char));
         }
 
+        std::cout << "[COMPRESS] 压缩完成，输出文件大小: " << output.tellp() << " bytes" << std::endl;
         return output.good();
+    } catch (const std::exception& e) {
+        std::cout << "[COMPRESS] 异常: " << e.what() << std::endl;
+        return false;
     } catch (...) {
+        std::cout << "[COMPRESS] 未知异常" << std::endl;
         return false;
     }
 }
 
 bool Compressor::decompress(const std::string& input_path, const std::string& output_path) {
     try {
+        std::cout << "[DECOMPRESS] 开始解压文件: " << input_path << std::endl;
+        
         // 读取压缩文件
         std::ifstream input(input_path, std::ios::binary);
         if (!input) {
+            std::cout << "[DECOMPRESS] 无法打开输入文件" << std::endl;
             return false;
         }
 
         // 处理空文件
         if (input.peek() == std::ifstream::traits_type::eof()) {
+            std::cout << "[DECOMPRESS] 空文件，直接创建空输出" << std::endl;
             std::ofstream output(output_path, std::ios::binary);
             return output.good();
         }
@@ -70,8 +89,10 @@ bool Compressor::decompress(const std::string& input_path, const std::string& ou
         // 读取原始数据大小
         uint32_t original_size;
         if (!input.read(reinterpret_cast<char*>(&original_size), sizeof(original_size))) {
+            std::cout << "[DECOMPRESS] 读取原始大小失败" << std::endl;
             return false;
         }
+        std::cout << "[DECOMPRESS] 原始文件大小: " << original_size << " bytes" << std::endl;
 
         // 读取匹配序列
         std::vector<LZ77Match> matches;
@@ -86,24 +107,35 @@ bool Compressor::decompress(const std::string& input_path, const std::string& ou
             }
         }
         input.close();
+        std::cout << "[DECOMPRESS] 读取到 " << matches.size() << " 个匹配" << std::endl;
 
         // LZ77解压缩
+        std::cout << "[DECOMPRESS] 开始LZ77解压缩" << std::endl;
         auto decompressed = lz77_decompress(matches);
+        std::cout << "[DECOMPRESS] 解压后大小: " << decompressed.size() << " bytes" << std::endl;
 
         // 验证解压后的大小
         if (decompressed.size() != original_size) {
+            std::cout << "[DECOMPRESS] 解压后大小不匹配，期望: " << original_size 
+                     << ", 实际: " << decompressed.size() << std::endl;
             return false;
         }
 
         // 写入解压缩文件
         std::ofstream output(output_path, std::ios::binary);
         if (!output) {
+            std::cout << "[DECOMPRESS] 无法创建输出文件" << std::endl;
             return false;
         }
 
         output.write(reinterpret_cast<const char*>(decompressed.data()), decompressed.size());
+        std::cout << "[DECOMPRESS] 解压完成" << std::endl;
         return output.good();
+    } catch (const std::exception& e) {
+        std::cout << "[DECOMPRESS] 异常: " << e.what() << std::endl;
+        return false;
     } catch (...) {
+        std::cout << "[DECOMPRESS] 未知异常" << std::endl;
         return false;
     }
 }
@@ -141,7 +173,10 @@ std::vector<LZ77Match> Compressor::lz77_compress(const std::vector<uint8_t>& dat
         if (best_length >= MIN_MATCH_LENGTH) {
             uint8_t next_char = (pos + best_length < data.size()) ? data[pos + best_length] : 0;
             matches.emplace_back(best_distance, best_length, next_char);
-            pos += best_length + 1;
+            pos += best_length;
+            if (next_char != 0) {
+                pos++;
+            }
         } else {
             matches.emplace_back(0, 0, data[pos]);
             pos++;

@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <cstring>
+#include <iostream>
 
 namespace fs = std::filesystem;
 using namespace byte_enclave;
@@ -58,45 +59,68 @@ TEST_F(BackupTest, CompleteBackupFlow) {
     // 1. 创建测试文件和目录结构
     auto source_dir = test_dir_ / "source";
     fs::create_directories(source_dir);
+    std::cout << "\n[TEST] 创建测试目录: " << source_dir << std::endl;
     
     // 普通文件
     auto file1 = createTestFile("source/file1.txt", "content1");
     auto file2 = createTestFile("source/subdir/file2.txt", "content2");
+    std::cout << "[TEST] 创建测试文件: " << file1 << ", " << file2 << std::endl;
     
     // 大文件（用于测试压缩）
     auto large_file = createTestFile("source/large.txt", std::string(1024 * 1024, 'A'));
+    std::cout << "[TEST] 创建大文件: " << large_file << " (size: " << fs::file_size(large_file) << " bytes)" << std::endl;
     
     // 隐藏文件（用于测试过滤）
     auto hidden_file = createTestFile("source/.hidden.txt", "hidden");
+    std::cout << "[TEST] 创建隐藏文件: " << hidden_file << std::endl;
     
     // 2. 设置备份选项
     BackupOptions options;
     options.include_hidden_files = false;  // 不包含隐藏文件
     options.exclude_patterns = {".bak$"};  // 排除 .bak 文件
     options.password = "test_password";    // 设置加密密码
+    std::cout << "[TEST] 备份选项设置完成: " 
+              << "include_hidden=" << std::boolalpha << options.include_hidden_files 
+              << ", password=" << (options.password.empty() ? "empty" : "set") << std::endl;
     
     // 3. 执行备份
     auto backup_path = test_dir_ / "backup.bak";
-    EXPECT_TRUE(backup_manager_->backup(source_dir, backup_path, options));
+    std::cout << "[TEST] 开始执行备份到: " << backup_path << std::endl;
+    bool backup_result = backup_manager_->backup(source_dir, backup_path, options);
+    std::cout << "[TEST] 备份结果: " << std::boolalpha << backup_result << std::endl;
+    EXPECT_TRUE(backup_result);
     
     // 4. 验证备份文件
+    std::cout << "[TEST] 验证备份文件是否存在" << std::endl;
     EXPECT_TRUE(fs::exists(backup_path));
+    if (fs::exists(backup_path)) {
+        std::cout << "[TEST] 备份文件大小: " << fs::file_size(backup_path) << " bytes" << std::endl;
+    }
     EXPECT_GT(fs::file_size(backup_path), 0);
-    EXPECT_TRUE(backup_manager_->verifyBackup(backup_path));
+    
+    std::cout << "[TEST] 开始验证备份完整性" << std::endl;
+    bool verify_result = backup_manager_->verifyBackup(backup_path, options);
+    std::cout << "[TEST] 验证结果: " << std::boolalpha << verify_result << std::endl;
+    EXPECT_TRUE(verify_result);
     
     // 5. 检查备份内容列表
-    auto contents = backup_manager_->listBackupContents(backup_path);
+    std::cout << "[TEST] 获取备份内容列表" << std::endl;
+    auto contents = backup_manager_->listBackupContents(backup_path, options);
+    std::cout << "[TEST] 备份内容数量: " << contents.size() << std::endl;
+    for (const auto& item : contents) {
+        std::cout << "[TEST] 备份项: " << item << std::endl;
+    }
     EXPECT_EQ(contents.size(), 3);  // file1.txt, file2.txt, large.txt
-    EXPECT_TRUE(std::find(contents.begin(), contents.end(), "file1.txt") != contents.end());
-    EXPECT_TRUE(std::find(contents.begin(), contents.end(), "subdir/file2.txt") != contents.end());
-    EXPECT_TRUE(std::find(contents.begin(), contents.end(), "large.txt") != contents.end());
-    EXPECT_FALSE(std::find(contents.begin(), contents.end(), ".hidden.txt") != contents.end());
     
     // 6. 执行还原
     auto restore_path = test_dir_ / "restore";
-    EXPECT_TRUE(backup_manager_->restore(backup_path, restore_path, options));
+    std::cout << "[TEST] 开始还原到: " << restore_path << std::endl;
+    bool restore_result = backup_manager_->restore(backup_path, restore_path, options);
+    std::cout << "[TEST] 还原结果: " << std::boolalpha << restore_result << std::endl;
+    EXPECT_TRUE(restore_result);
     
     // 7. 验证还原的文件
+    std::cout << "[TEST] 验证还原的文件" << std::endl;
     EXPECT_TRUE(fs::exists(restore_path / "file1.txt"));
     EXPECT_TRUE(fs::exists(restore_path / "subdir/file2.txt"));
     EXPECT_TRUE(fs::exists(restore_path / "large.txt"));

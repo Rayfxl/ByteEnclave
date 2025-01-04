@@ -31,9 +31,11 @@ public:
                 const fs::path& target_path,
                 const BackupOptions& options = BackupOptions{});
     
-    std::vector<fs::path> listBackupContents(const fs::path& backup_path);
+    std::vector<fs::path> listBackupContents(const fs::path& backup_path,
+                                           const BackupOptions& options = BackupOptions{});
     
-    bool verifyBackup(const fs::path& backup_path);
+    bool verifyBackup(const fs::path& backup_path,
+                     const BackupOptions& options = BackupOptions{});
     
 protected:
     void collectFiles(const fs::path& dir,
