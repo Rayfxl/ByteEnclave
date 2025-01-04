@@ -12,7 +12,7 @@ import byte_enclave_python
 
 class BackupThread(QThread):
     """后台备份线程"""
-    progress = pyqtSignal(str)  # 进度信号
+    progress = pyqtSignal(str, int)  # 进度信号，参数为(消息, 百分比)
     finished = pyqtSignal(bool, str)  # 完成信号，参数为(是否成功, 错误信息)
     
     def __init__(self, source, target, options):
@@ -23,10 +23,28 @@ class BackupThread(QThread):
     
     def run(self):
         try:
-            self.progress.emit('正在准备备份...')
+            self.progress.emit('正在准备备份...', 0)
             backup_manager = byte_enclave_python.BackupManager()
+            
+            # 计算总文件大小
+            total_size = 0
+            if os.path.isfile(self.source):
+                total_size = os.path.getsize(self.source)
+            else:
+                for root, dirs, files in os.walk(self.source):
+                    for file in files:
+                        total_size += os.path.getsize(os.path.join(root, file))
+            
+            processed_size = 0
+            def progress_callback(current_file, file_size):
+                nonlocal processed_size
+                processed_size += file_size
+                progress = min(95, int(processed_size * 100 / total_size))
+                self.progress.emit(f'正在备份: {current_file}', progress)
+            
             result = backup_manager.backup(self.source, self.target, self.options)
             if result:
+                self.progress.emit('备份完成', 100)
                 self.finished.emit(True, '')
             else:
                 self.finished.emit(False, '备份失败: 操作返回False')
@@ -37,7 +55,7 @@ class BackupThread(QThread):
 
 class RestoreThread(QThread):
     """后台还原线程"""
-    progress = pyqtSignal(str)  # 进度信号
+    progress = pyqtSignal(str, int)  # 进度信号，参数为(消息, 百分比)
     finished = pyqtSignal(bool, str)  # 完成信号，参数为(是否成功, 错误信息)
     
     def __init__(self, source, target, options):
@@ -48,10 +66,21 @@ class RestoreThread(QThread):
     
     def run(self):
         try:
-            self.progress.emit('正在准备还原...')
+            self.progress.emit('正在准备还原...', 0)
             backup_manager = byte_enclave_python.BackupManager()
+            
+            # 获取备份文件大小
+            total_size = os.path.getsize(self.source)
+            processed_size = 0
+            def progress_callback(current_file, file_size):
+                nonlocal processed_size
+                processed_size += file_size
+                progress = min(95, int(processed_size * 100 / total_size))
+                self.progress.emit(f'正在还原: {current_file}', progress)
+            
             result = backup_manager.restore(self.source, self.target, self.options)
             if result:
+                self.progress.emit('还原完成', 100)
                 self.finished.emit(True, '')
             else:
                 self.finished.emit(False, '还原失败: 操作返回False')
@@ -62,7 +91,7 @@ class RestoreThread(QThread):
 
 class VerifyThread(QThread):
     """后台验证线程"""
-    progress = pyqtSignal(str)  # 进度信号
+    progress = pyqtSignal(str, int)  # 进度信号，参数为(消息, 百分比)
     finished = pyqtSignal(bool, str)  # 完成信号，参数为(是否成功, 错误信息)
     
     def __init__(self, source, options):
@@ -72,10 +101,21 @@ class VerifyThread(QThread):
     
     def run(self):
         try:
-            self.progress.emit('正在验证备份...')
+            self.progress.emit('正在验证备份...', 0)
             backup_manager = byte_enclave_python.BackupManager()
+            
+            # 获取备份文件大小
+            total_size = os.path.getsize(self.source)
+            processed_size = 0
+            def progress_callback(current_file, file_size):
+                nonlocal processed_size
+                processed_size += file_size
+                progress = min(95, int(processed_size * 100 / total_size))
+                self.progress.emit(f'正在验证: {current_file}', progress)
+            
             result = backup_manager.verify_backup(self.source, self.options)
             if result:
+                self.progress.emit('验证完成', 100)
                 self.finished.emit(True, '')
             else:
                 self.finished.emit(False, '备份验证失败')
@@ -87,6 +127,8 @@ class VerifyThread(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        # 保持对象引用
+        self.backup_manager = byte_enclave_python.BackupManager()
         self.initUI()
         self.showWelcomePage()  # 显示欢迎页面
 
@@ -168,7 +210,7 @@ class MainWindow(QMainWindow):
         welcome_label.setAlignment(Qt.AlignCenter)
         welcome_label.setStyleSheet("font-size: 24px; padding: 20px;")
         layout.addWidget(welcome_label)
-        
+
         # 设置布局
         self.central_widget.setLayout(layout)
 
@@ -177,6 +219,9 @@ class MainWindow(QMainWindow):
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.setWindowTitle('备份')
+
+        # 重新创建备份管理器
+        self.backup_manager = byte_enclave_python.BackupManager()
 
         # 创建布局
         layout = QVBoxLayout()
@@ -250,6 +295,9 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.central_widget)
         self.setWindowTitle('还原')
 
+        # 重新创建备份管理器
+        self.backup_manager = byte_enclave_python.BackupManager()
+
         # 创建布局
         layout = QVBoxLayout()
         layout.setContentsMargins(20, 20, 20, 20)
@@ -321,8 +369,12 @@ class MainWindow(QMainWindow):
         backup_dir = os.path.expanduser("~/data")  # 默认备份目录
         if os.path.exists(backup_dir):
             for file in os.listdir(backup_dir):
-                if file.endswith('.backup'):
-                    self.backup_list.addItem(os.path.join(backup_dir, file))
+                # 只显示.backup文件，跳过所有临时文件
+                if file.endswith('.backup') and not file.endswith('.tmp'):
+                    full_path = os.path.join(backup_dir, file)
+                    # 确保不是临时文件
+                    if not any(full_path.endswith(suffix) for suffix in ['.pack.tmp', '.gz.tmp', '.enc.tmp', '.dec.tmp']):
+                        self.backup_list.addItem(full_path)
 
     def onBackupSelected(self):
         """当选择备份文件时更新内容预览"""
@@ -334,34 +386,36 @@ class MainWindow(QMainWindow):
             backup_path = items[0].text()
             if not os.path.exists(backup_path):
                 self.content_list.clear()
-                self.content_list.append(f'错误: 备份文件不存在: {backup_path}')
+                self.content_list.setPlainText(f'错误: 备份文件不存在: {backup_path}')
                 return
 
-            # 创建备份管理器
-            backup_manager = byte_enclave_python.BackupManager()
-            options = byte_enclave_python.BackupOptions()
-            if self.use_encryption.isChecked():
-                if not self.password.text():
+            # 使用已创建的备份管理器
+            try:
+                # 先尝试不带密码读取
+                options = byte_enclave_python.BackupOptions()
+                contents = self.backup_manager.list_backup_contents(backup_path, options)
+                if contents:
+                    # 显示内容
                     self.content_list.clear()
-                    self.content_list.append('请输入密码以查看加密备份的内容')
-                    return
-                options.password = self.password.text()
-            
-            # 获取备份内容
-            contents = backup_manager.list_backup_contents(backup_path, options)
-            
-            # 显示内容
-            self.content_list.clear()
-            self.content_list.append('备份文件内容:')
-            self.content_list.append('-' * 40)
-            for item in contents:
-                self.content_list.append(str(item))
+                    self.content_list.setPlainText('备份文件内容:\n' + '-' * 40 + '\n')
+                    for item in contents:
+                        self.content_list.append(str(item))
+                else:
+                    # 如果内容为空，可能是加密文件
+                    self.content_list.clear()
+                    self.content_list.setPlainText('这是一个加密的备份文件\n请在还原时提供正确的密码')
+            except Exception as e:
+                # 读取失败，说明是加密文件
+                self.content_list.clear()
+                self.content_list.setPlainText('这是一个加密的备份文件\n请在还原时提供正确的密码')
+                print(f'读取备份内容时出错: {str(e)}')
+                
         except Exception as e:
             import traceback
-            error_msg = f'无法读取备份内容:\n{str(e)}\n\n详细错误:\n{traceback.format_exc()}'
+            error_msg = f'预览备份内容时发生错误:\n{str(e)}\n\n详细错误:\n{traceback.format_exc()}'
             print(error_msg)
             self.content_list.clear()
-            self.content_list.append(error_msg)
+            self.content_list.setPlainText(error_msg)
 
     def selectBackupSource(self):
         dialog = QFileDialog(self)
@@ -447,13 +501,18 @@ class MainWindow(QMainWindow):
         
         # 创建并启动备份线程
         self.backup_thread = BackupThread(source, target, options)
-        self.backup_thread.progress.connect(self.updateProgress)
+        self.backup_thread.progress.connect(lambda msg, pct: self.updateProgress(msg, pct))
         self.backup_thread.finished.connect(self.onBackupFinished)
         self.backup_thread.start()
+        
+        # 禁用开始按钮，避免重复点击
+        self.sender().setEnabled(False)
 
-    def updateProgress(self, message):
+    def updateProgress(self, message, percent=None):
         """更新进度信息"""
         self.progress_label.setText(message)
+        if percent is not None:
+            self.progress_bar.setValue(percent)
 
     def onBackupFinished(self, success, error_msg):
         """备份完成的回调"""
@@ -465,6 +524,10 @@ class MainWindow(QMainWindow):
             print(error_msg)  # 打印错误信息到控制台
             QMessageBox.critical(self, '错误', error_msg)
         self.progress_bar.setVisible(False)
+        # 重新启用开始按钮
+        for btn in self.findChildren(QPushButton):
+            if btn.text() == '开始备份':
+                btn.setEnabled(True)
 
     def startRestore(self):
         # 获取选中的备份文件
@@ -499,9 +562,12 @@ class MainWindow(QMainWindow):
         
         # 创建并启动还原线程
         self.restore_thread = RestoreThread(source, target, options)
-        self.restore_thread.progress.connect(self.updateProgress)
+        self.restore_thread.progress.connect(lambda msg, pct: self.updateProgress(msg, pct))
         self.restore_thread.finished.connect(self.onRestoreFinished)
         self.restore_thread.start()
+        
+        # 禁用开始按钮，避免重复点击
+        self.sender().setEnabled(False)
 
     def onRestoreFinished(self, success, error_msg):
         """还原完成的回调"""
@@ -513,6 +579,10 @@ class MainWindow(QMainWindow):
             print(error_msg)  # 打印错误信息到控制台
             QMessageBox.critical(self, '错误', error_msg)
         self.progress_bar.setVisible(False)
+        # 重新启用开始按钮
+        for btn in self.findChildren(QPushButton):
+            if btn.text() == '开始还原':
+                btn.setEnabled(True)
 
     def verifyBackup(self):
         # 获取选中的备份文件
@@ -536,9 +606,12 @@ class MainWindow(QMainWindow):
         
         # 创建并启动验证线程
         self.verify_thread = VerifyThread(source, options)
-        self.verify_thread.progress.connect(self.updateProgress)
+        self.verify_thread.progress.connect(lambda msg, pct: self.updateProgress(msg, pct))
         self.verify_thread.finished.connect(self.onVerifyFinished)
         self.verify_thread.start()
+        
+        # 禁用验证按钮，避免重复点击
+        self.sender().setEnabled(False)
 
     def onVerifyFinished(self, success, error_msg):
         """验证完成的回调"""
@@ -550,6 +623,10 @@ class MainWindow(QMainWindow):
             print(error_msg)  # 打印错误信息到控制台
             QMessageBox.critical(self, '错误', error_msg)
         self.progress_bar.setVisible(False)
+        # 重新启用验证按钮
+        for btn in self.findChildren(QPushButton):
+            if btn.text() == '验证备份':
+                btn.setEnabled(True)
 
     def clearLayout(self, widget):
         layout = widget.layout()
