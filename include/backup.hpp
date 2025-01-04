@@ -1,23 +1,22 @@
 #pragma once
 
 #include "filesystem.hpp"
+#include "packer.hpp"
+#include "compressor.hpp"
+#include "encryptor.hpp"
 #include <filesystem>
 #include <string>
 #include <vector>
-#include <map>
 #include <memory>
-#include <fstream>
-#include <stdexcept>
-#include <cstdint>
 
 namespace byte_enclave {
 
 namespace fs = std::filesystem;
 
 struct BackupOptions {
-    bool include_symlinks = true;
     bool include_hidden_files = false;
     std::vector<std::string> exclude_patterns;
+    std::string password;  // 加密密码
 };
 
 class BackupManager {
@@ -37,16 +36,17 @@ public:
     bool verifyBackup(const fs::path& backup_path);
     
 protected:
-    bool verifyFile(const fs::path& path);
-    uint32_t calculateChecksum(const fs::path& path);
     void collectFiles(const fs::path& dir,
                      std::vector<fs::path>& files,
                      const BackupOptions& options);
     
-    uint32_t calculateExpectedChecksum(const fs::path& path);
     uint64_t calculateRequiredSpace(const fs::path& path);
+
 private:
     std::unique_ptr<FileSystem> fs_;
+    std::unique_ptr<Packer> packer_;
+    std::unique_ptr<Compressor> compressor_;
+    std::unique_ptr<Encryptor> encryptor_;
 };
 
 } // namespace byte_enclave

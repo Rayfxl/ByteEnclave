@@ -44,13 +44,11 @@ namespace {
 Packer::Packer() = default;
 
 bool Packer::writeHeader(std::ofstream& out, const PackageHeader& header) {
-    out.write(reinterpret_cast<const char*>(&header), sizeof(PackageHeader));
-    return out.good();
+    return writeData(out, header);
 }
 
 bool Packer::readHeader(std::ifstream& in, PackageHeader& header) {
-    in.read(reinterpret_cast<char*>(&header), sizeof(PackageHeader));
-    return in.good();
+    return readData(in, header);
 }
 
 uint32_t Packer::calculateChecksum(const std::vector<uint8_t>& data) {
@@ -58,7 +56,6 @@ uint32_t Packer::calculateChecksum(const std::vector<uint8_t>& data) {
     return crc32(checksum, data.data(), data.size());
 }
 
-// 添加辅助函数
 bool writeFileHeader(std::ofstream& out, const FileHeader& fh) {
     return writeData(out, fh.type) &&
            writeString(out, fh.path) &&
@@ -83,74 +80,52 @@ bool Packer::pack(const std::vector<fs::path>& files,
         std::ofstream out(output_path, std::ios::binary);
         if (!out) return false;
         
-        // 设置输出流的缓冲区
-        std::vector<char> out_buffer(BUFFER_SIZE);
-        out.rdbuf()->pubsetbuf(out_buffer.data(), out_buffer.size());
-        
         // 写入包头
         PackageHeader header;
         header.magic = MAGIC_NUMBER;
         header.version = VERSION;
-        header.file_count = 0;  // 稍后更新
+        header.file_count = files.size();
         header.total_size = 0;
         header.checksum = 0;
         
         if (!writeHeader(out, header)) return false;
         
-        // 获取基准路径
-        fs::path base_path;
-        std::vector<fs::path> files_to_pack;
-        
-        if (!files.empty()) {
-            if (fs::is_directory(files[0])) {
-                base_path = files[0];
-                // 收集目录下所有文件
-                for (const auto& entry : fs::recursive_directory_iterator(files[0])) {
-                    if (fs::is_regular_file(entry) || fs::is_symlink(entry)) {
-                        files_to_pack.push_back(entry);
-                    }
-                }
-            } else {
-                base_path = files[0].parent_path();
-                files_to_pack = files;
-            }
-        }
-        
-        // 更新文件数量
-        header.file_count = files_to_pack.size();
-        
         // 计算文件头的位置
         size_t headers_start = sizeof(PackageHeader);
         size_t data_start = headers_start;
         
+        // 获取基准路径
+        fs::path base_path;
+        if (!files.empty()) {
+            base_path = files[0].parent_path();
+            for (const auto& file : files) {
+                auto parent = file.parent_path();
+                while (!parent.empty() && parent != base_path) {
+                    if (parent.string().length() < base_path.string().length()) {
+                        base_path = parent;
+                        break;
+                    }
+                    parent = parent.parent_path();
+                }
+            }
+        }
+        
         // 计算文件头大小
-        for (const auto& file : files_to_pack) {
+        for (const auto& file : files) {
             data_start += sizeof(FileHeader::Type);  // 类型
             data_start += sizeof(uint64_t) + fs::relative(file, base_path).string().size();  // 路径
             data_start += sizeof(uint64_t) * 2 + sizeof(uint32_t);  // size, offset, checksum
-            
-            if (fs::is_symlink(file)) {
-                data_start += sizeof(uint64_t) + fs::read_symlink(file).string().size();  // link_target
-            }
         }
         
         // 写入文件头
         std::vector<FileHeader> file_headers;
         uint64_t current_offset = data_start;
         
-        for (const auto& file : files_to_pack) {
+        for (const auto& file : files) {
             FileHeader fh;
             fh.path = fs::relative(file, base_path).string();
-            
-            if (fs::is_symlink(file)) {
-                fh.type = FileHeader::Type::Symlink;
-                fh.link_target = fs::read_symlink(file).string();
-                fh.size = fh.link_target.length();
-            } else {
-                fh.type = FileHeader::Type::Regular;
-                fh.size = fs::file_size(file);
-            }
-            
+            fh.type = FileHeader::Type::Regular;
+            fh.size = fs::file_size(file);
             fh.offset = current_offset;
             fh.checksum = 0;  // 稍后更新
             
@@ -165,41 +140,31 @@ bool Packer::pack(const std::vector<fs::path>& files,
         uint32_t total_checksum = crc32(0L, Z_NULL, 0);
         std::vector<uint8_t> buffer(BUFFER_SIZE);
         
-        for (size_t i = 0; i < files_to_pack.size(); ++i) {
-            const auto& file = files_to_pack[i];
+        for (size_t i = 0; i < files.size(); ++i) {
+            const auto& file = files[i];
             auto& fh = file_headers[i];
             
-            if (fs::is_symlink(file)) {
-                // 写入符号链接目标
-                if (!out.write(fh.link_target.c_str(), fh.link_target.length())) {
-                    return false;
-                }
-                total_checksum = crc32(total_checksum, 
-                    (const Bytef*)fh.link_target.c_str(), 
-                    fh.link_target.length());
-            } else {
-                // 写入文件内容
-                std::ifstream in(file, std::ios::binary);
-                if (!in) return false;
-                
-                uint32_t file_checksum = crc32(0L, Z_NULL, 0);
-                
-                while (in) {
-                    in.read(reinterpret_cast<char*>(buffer.data()), buffer.size());
-                    size_t bytes_read = in.gcount();
-                    if (bytes_read > 0) {
-                        file_checksum = crc32(file_checksum, buffer.data(), bytes_read);
-                        total_checksum = crc32(total_checksum, buffer.data(), bytes_read);
-                        
-                        if (!out.write(reinterpret_cast<const char*>(buffer.data()),
-                                     bytes_read)) {
-                            return false;
-                        }
+            // 写入文件内容
+            std::ifstream in(file, std::ios::binary);
+            if (!in) return false;
+            
+            uint32_t file_checksum = crc32(0L, Z_NULL, 0);
+            
+            while (in) {
+                in.read(reinterpret_cast<char*>(buffer.data()), buffer.size());
+                size_t bytes_read = in.gcount();
+                if (bytes_read > 0) {
+                    file_checksum = crc32(file_checksum, buffer.data(), bytes_read);
+                    total_checksum = crc32(total_checksum, buffer.data(), bytes_read);
+                    
+                    if (!out.write(reinterpret_cast<const char*>(buffer.data()),
+                                 bytes_read)) {
+                        return false;
                     }
                 }
-                
-                fh.checksum = file_checksum;
             }
+            
+            fh.checksum = file_checksum;
         }
         
         // 更新文件头的校验和
@@ -225,10 +190,6 @@ bool Packer::unpack(const fs::path& package_path,
         std::ifstream in(package_path, std::ios::binary);
         if (!in) return false;
         
-        // 设置输入流的缓冲区
-        std::vector<char> in_buffer(BUFFER_SIZE);
-        in.rdbuf()->pubsetbuf(in_buffer.data(), in_buffer.size());
-        
         // 读取包头
         PackageHeader header;
         if (!readHeader(in, header)) return false;
@@ -249,11 +210,10 @@ bool Packer::unpack(const fs::path& package_path,
         // 创建输出目录
         fs::create_directories(output_dir);
         
-        // 计算总校验和
-        uint32_t total_checksum = crc32(0L, Z_NULL, 0);
+        // 解包文件
         std::vector<uint8_t> buffer(BUFFER_SIZE);
+        uint32_t total_checksum = crc32(0L, Z_NULL, 0);
         
-        // 解包每个文件
         for (const auto& fh : file_headers) {
             auto output_path = output_dir / fh.path;
             fs::create_directories(output_path.parent_path());
@@ -261,68 +221,43 @@ bool Packer::unpack(const fs::path& package_path,
             // 定位到文件数据
             in.seekg(fh.offset);
             
-            if (fh.type == FileHeader::Type::Symlink) {
-                // 读取并创建符号链接
-                std::string link_target;
-                link_target.resize(fh.size);
-                if (!in.read(link_target.data(), fh.size)) return false;
+            // 创建输出文件
+            std::ofstream out(output_path, std::ios::binary);
+            if (!out) return false;
+            
+            // 复制文件数据
+            uint32_t file_checksum = crc32(0L, Z_NULL, 0);
+            uint64_t remaining = fh.size;
+            
+            while (remaining > 0) {
+                size_t to_read = std::min(remaining, buffer.size());
+                in.read(reinterpret_cast<char*>(buffer.data()), to_read);
+                size_t bytes_read = in.gcount();
+                if (bytes_read == 0) break;
                 
-                total_checksum = crc32(total_checksum, 
-                    (const Bytef*)link_target.c_str(), 
-                    link_target.length());
+                file_checksum = crc32(file_checksum, buffer.data(), bytes_read);
+                total_checksum = crc32(total_checksum, buffer.data(), bytes_read);
                 
-                try {
-                    if (fs::exists(output_path)) {
-                        fs::remove(output_path);
-                    }
-                    fs::create_symlink(link_target, output_path);
-                } catch (...) {
+                if (!out.write(reinterpret_cast<const char*>(buffer.data()),
+                             bytes_read)) {
                     return false;
                 }
-            } else {
-                // 读取并写入文件内容
-                std::ofstream out(output_path, std::ios::binary);
-                if (!out) return false;
                 
-                uint32_t file_checksum = crc32(0L, Z_NULL, 0);
-                uint64_t remaining = fh.size;
-                
-                while (remaining > 0) {
-                    size_t to_read = std::min(remaining, buffer.size());
-                    if (!in.read(reinterpret_cast<char*>(buffer.data()), to_read)) {
-                        return false;
-                    }
-                    
-                    file_checksum = crc32(file_checksum, buffer.data(), to_read);
-                    total_checksum = crc32(total_checksum, buffer.data(), to_read);
-                    
-                    if (!out.write(reinterpret_cast<const char*>(buffer.data()),
-                                 to_read)) {
-                        return false;
-                    }
-                    
-                    remaining -= to_read;
-                }
-                
-                // 验证文件校验和
-                if (file_checksum != fh.checksum) {
-                    return false;
-                }
+                remaining -= bytes_read;
+            }
+            
+            // 验证文件校验和
+            if (file_checksum != fh.checksum) {
+                return false;
             }
         }
         
         // 验证总校验和
-        if (total_checksum != header.checksum) {
-            return false;
-        }
-        
-        return true;
+        return total_checksum == header.checksum;
     } catch (...) {
         return false;
     }
 }
-
-
 
 bool Packer::extractFile(const fs::path& package_path,
                         const std::string& file_path,
@@ -331,83 +266,66 @@ bool Packer::extractFile(const fs::path& package_path,
         std::ifstream in(package_path, std::ios::binary);
         if (!in) return false;
         
-        // 设置输入流的缓冲区
-        std::vector<char> in_buffer(BUFFER_SIZE);
-        in.rdbuf()->pubsetbuf(in_buffer.data(), in_buffer.size());
-        
+        // 读取包头
         PackageHeader header;
         if (!readHeader(in, header)) return false;
         
+        // 验证魔数和版本
         if (header.magic != MAGIC_NUMBER || header.version != VERSION) {
             return false;
         }
         
-        // 读取文件头列表
-        std::vector<FileHeader> file_headers;
+        // 查找目标文件
+        FileHeader target_fh;
+        bool found = false;
+        
         for (uint64_t i = 0; i < header.file_count; ++i) {
             FileHeader fh;
-            if (!readString(in, fh.path)) return false;
-            if (!readData(in, fh.size)) return false;
-            if (!readData(in, fh.offset)) return false;
-            if (!readData(in, fh.checksum)) return false;
-            file_headers.push_back(fh);
-        }
-        
-        // 查找目标文件
-        const FileHeader* target_file = nullptr;
-        for (const auto& fh : file_headers) {
+            if (!readFileHeader(in, fh)) return false;
+            
             if (fh.path == file_path) {
-                target_file = &fh;
+                target_fh = fh;
+                found = true;
                 break;
             }
         }
         
-        if (!target_file) return false;
+        if (!found) return false;
         
         // 创建输出目录
         fs::create_directories(output_path.parent_path());
         
-        // 打开输出文件
+        // 定位到文件数据
+        in.seekg(target_fh.offset);
+        
+        // 创建输出文件
         std::ofstream out(output_path, std::ios::binary);
         if (!out) return false;
         
-        // 设置输出流的缓冲区
-        std::vector<char> out_buffer(BUFFER_SIZE);
-        out.rdbuf()->pubsetbuf(out_buffer.data(), out_buffer.size());
-        
-        // 定位到文件数据
-        in.seekg(target_file->offset);
-        
-        // 读取并写入文件数据
+        // 复制文件数据
         std::vector<uint8_t> buffer(BUFFER_SIZE);
         uint32_t file_checksum = crc32(0L, Z_NULL, 0);
-        uint64_t remaining = target_file->size;
+        uint64_t remaining = target_fh.size;
         
         while (remaining > 0) {
             size_t to_read = std::min(remaining, buffer.size());
-            if (!in.read(reinterpret_cast<char*>(buffer.data()), to_read)) {
-                return false;
-            }
+            in.read(reinterpret_cast<char*>(buffer.data()), to_read);
+            size_t bytes_read = in.gcount();
+            if (bytes_read == 0) break;
             
-            // 更新文件校验和
-            file_checksum = crc32(file_checksum, buffer.data(), to_read);
+            file_checksum = crc32(file_checksum, buffer.data(), bytes_read);
             
-            // 写入文件数据
             if (!out.write(reinterpret_cast<const char*>(buffer.data()),
-                         to_read)) {
+                         bytes_read)) {
                 return false;
             }
             
-            remaining -= to_read;
+            remaining -= bytes_read;
         }
         
         // 验证文件校验和
-        if (file_checksum != target_file->checksum) {
-            return false;
-        }
-        
-        return true;
-    } catch (const std::exception&) {
+        return file_checksum == target_fh.checksum;
+    } catch (...) {
         return false;
     }
 }
@@ -426,85 +344,81 @@ bool Packer::verifyChecksum(const fs::path& package_path) {
             return false;
         }
         
-        // 保存原始校验和
-        uint32_t stored_checksum = header.checksum;
-        
         // 读取文件头列表
         std::vector<FileHeader> file_headers;
         for (uint64_t i = 0; i < header.file_count; ++i) {
             FileHeader fh;
-            if (!readString(in, fh.path)) return false;
-            if (!readData(in, fh.size)) return false;
-            if (!readData(in, fh.offset)) return false;
-            if (!readData(in, fh.checksum)) return false;
+            if (!readFileHeader(in, fh)) return false;
             file_headers.push_back(fh);
         }
         
-        // 计算总校验和
+        // 验证文件数据
+        std::vector<uint8_t> buffer(BUFFER_SIZE);
         uint32_t total_checksum = crc32(0L, Z_NULL, 0);
+        
         for (const auto& fh : file_headers) {
-            // 保存当前位置
-            auto current_pos = in.tellg();
-            
-            // 读取文件数据
-            std::vector<uint8_t> file_data(fh.size);
+            // 定位到文件数据
             in.seekg(fh.offset);
             
-            if (!in.read(reinterpret_cast<char*>(file_data.data()),
-                        file_data.size())) {
-                return false;
+            // 计算文件校验和
+            uint32_t file_checksum = crc32(0L, Z_NULL, 0);
+            uint64_t remaining = fh.size;
+            
+            while (remaining > 0) {
+                size_t to_read = std::min(remaining, buffer.size());
+                in.read(reinterpret_cast<char*>(buffer.data()), to_read);
+                size_t bytes_read = in.gcount();
+                if (bytes_read == 0) break;
+                
+                file_checksum = crc32(file_checksum, buffer.data(), bytes_read);
+                total_checksum = crc32(total_checksum, buffer.data(), bytes_read);
+                
+                remaining -= bytes_read;
             }
             
             // 验证文件校验和
-            if (calculateChecksum(file_data) != fh.checksum) {
+            if (file_checksum != fh.checksum) {
                 return false;
             }
-            
-            // 更新总校验和
-            total_checksum = crc32(total_checksum, file_data.data(), file_data.size());
-            
-            // 恢复文件位置
-            in.seekg(current_pos);
         }
         
-        // 验证包校验和
-        if (total_checksum != stored_checksum) {
-            return false;
-        }
-        
-        return true;
-    } catch (const std::exception&) {
+        // 验证总校验和
+        return total_checksum == header.checksum;
+    } catch (...) {
         return false;
     }
 }
 
 std::vector<FileHeader> Packer::listContents(const fs::path& package_path) {
-    std::vector<FileHeader> contents;
+    std::vector<FileHeader> headers;
     
     try {
         std::ifstream in(package_path, std::ios::binary);
-        if (!in) return contents;
+        if (!in) return headers;
         
+        // 读取包头
         PackageHeader header;
-        if (!readHeader(in, header)) return contents;
+        if (!readHeader(in, header)) return headers;
         
+        // 验证魔数和版本
         if (header.magic != MAGIC_NUMBER || header.version != VERSION) {
-            return contents;
+            return headers;
         }
         
+        // 读取文件头列表
         for (uint64_t i = 0; i < header.file_count; ++i) {
             FileHeader fh;
-            if (!readString(in, fh.path)) return contents;
-            if (!readData(in, fh.size)) return contents;
-            if (!readData(in, fh.offset)) return contents;
-            if (!readData(in, fh.checksum)) return contents;
-            contents.push_back(fh);
+            if (!readFileHeader(in, fh)) {
+                headers.clear();
+                return headers;
+            }
+            headers.push_back(fh);
         }
-    } catch (const std::exception&) {
-        contents.clear();
+    } catch (...) {
+        headers.clear();
     }
     
-    return contents;
+    return headers;
 }
 
 } // namespace byte_enclave

@@ -23,9 +23,9 @@ PYBIND11_MODULE(byte_enclave_python, m) {
     
     py::class_<BackupOptions>(m, "BackupOptions")
         .def(py::init<>())
-        .def_readwrite("include_symlinks", &BackupOptions::include_symlinks)
         .def_readwrite("include_hidden_files", &BackupOptions::include_hidden_files)
-        .def_readwrite("exclude_patterns", &BackupOptions::exclude_patterns);
+        .def_readwrite("exclude_patterns", &BackupOptions::exclude_patterns)
+        .def_readwrite("password", &BackupOptions::password);
     
     py::class_<BackupManager>(m, "BackupManager")
         .def(py::init<>())
