@@ -79,6 +79,43 @@ TEST_F(PackerTest, PackMultipleFiles) {
     EXPECT_TRUE(fs::exists(pack_path));
 }
 
+// 测试打包目录结构
+TEST_F(PackerTest, PackDirectoryStructure) {
+    // 创建测试目录结构
+    auto sub_dir = test_dir_ / "subdir";
+    fs::create_directories(sub_dir);
+    
+    auto file1 = createTestFile("file1.txt", "content1");
+    auto file2 = createTestFile("subdir/file2.txt", "content2");
+    auto pack_path = test_dir_ / "test.pack";
+    auto extract_dir = test_dir_ / "extract";
+
+    // 修改: 使用文件列表而不是目录
+    std::vector<fs::path> files_to_pack = {file1, file2};
+    EXPECT_TRUE(packer_->pack(files_to_pack, pack_path));
+    EXPECT_TRUE(packer_->unpack(pack_path, extract_dir));
+
+    EXPECT_TRUE(fs::exists(extract_dir / "file1.txt"));
+    EXPECT_TRUE(fs::exists(extract_dir / "subdir/file2.txt"));
+}
+
+// 测试符号链接
+TEST_F(PackerTest, PackSymlink) {
+    auto target = createTestFile("target.txt", "target content");
+    auto link = test_dir_ / "link.txt";
+    fs::create_symlink(target, link);
+    
+    auto pack_path = test_dir_ / "test.pack";
+    auto extract_dir = test_dir_ / "extract";
+
+    EXPECT_TRUE(packer_->pack({link}, pack_path));
+    EXPECT_TRUE(packer_->unpack(pack_path, extract_dir));
+
+    auto extracted_link = extract_dir / "link.txt";
+    EXPECT_TRUE(fs::is_symlink(extracted_link));
+    EXPECT_EQ(fs::read_symlink(link), fs::read_symlink(extracted_link));
+}
+
 // 测试解包文件
 TEST_F(PackerTest, UnpackFiles) {
     auto src_path = createTestFile("source.txt", "test content");

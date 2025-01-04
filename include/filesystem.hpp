@@ -80,28 +80,6 @@ public:
      * @return bool 操作是否成功
      */
     bool createNamedPipe(const fs::path& path);
-    
-    /**
-     * @brief 获取文件类型
-     * @param path 文件路径
-     * @return fs::file_type 文件类型枚举值
-     * @throw std::runtime_error 当无法获取文件类型时抛出异常
-     */
-    fs::file_type getFileType(const fs::path& path);
-    
-    /**
-     * @brief 检查文件是否可读
-     * @param path 文件路径
-     * @return bool 文件是否可读
-     */
-    bool isReadable(const fs::path& path);
-    
-    /**
-     * @brief 检查文件是否可写
-     * @param path 文件路径
-     * @return bool 文件是否可写
-     */
-    bool isWritable(const fs::path& path);
 
 private:
     /**

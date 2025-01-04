@@ -41,8 +41,7 @@ PYBIND11_MODULE(byte_enclave_python, m) {
         .def("copy_file", &FileSystem::copyFile)
         .def("create_symlink", &FileSystem::createSymlink)
         .def("create_hardlink", &FileSystem::createHardlink)
-        .def("create_named_pipe", &FileSystem::createNamedPipe)
-        .def("get_file_type", &FileSystem::getFileType);
+        .def("create_named_pipe", &FileSystem::createNamedPipe);
     
     py::class_<Packer>(m, "Packer")
         .def(py::init<>())
@@ -60,6 +59,8 @@ PYBIND11_MODULE(byte_enclave_python, m) {
     py::class_<Encryptor>(m, "Encryptor")
         .def(py::init<>())
         .def("initialize", &Encryptor::initialize)
-        .def("encrypt", &Encryptor::encrypt)
-        .def("decrypt", &Encryptor::decrypt);
+        .def("encrypt", static_cast<bool (Encryptor::*)(const fs::path&, const fs::path&, const std::string&)>(&Encryptor::encrypt))
+        .def("decrypt", static_cast<bool (Encryptor::*)(const fs::path&, const fs::path&, const std::string&)>(&Encryptor::decrypt))
+        .def("encrypt_data", static_cast<std::vector<uint8_t> (Encryptor::*)(const std::vector<uint8_t>&)>(&Encryptor::encrypt))
+        .def("decrypt_data", static_cast<std::vector<uint8_t> (Encryptor::*)(const std::vector<uint8_t>&)>(&Encryptor::decrypt));
 } 

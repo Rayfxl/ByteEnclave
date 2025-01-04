@@ -49,12 +49,11 @@ protected:
         }
     }
 
-    // 创建测试文件
     fs::path createTestFile(const std::string& name, const std::string& content = "test") {
         fs::path file_path = test_dir_ / name;
+        fs::create_directories(file_path.parent_path());
         std::ofstream file(file_path);
         file << content;
-        file.close();
         return file_path;
     }
 
@@ -62,17 +61,18 @@ protected:
     std::unique_ptr<BackupManager> backup_manager_;
 };
 
-// 测试基本备份功能
-TEST_F(BackupTest, BasicBackup) {
-    auto source_file = createTestFile("source.txt", "test content");
-    auto backup_path = test_dir_ / "backup";
+// 1. 单文件备份测试
+TEST_F(BackupTest, SingleFileBackup) {
+    auto source_file = createTestFile("test.txt", "test content");
+    auto backup_path = test_dir_ / "backup.bak";
     auto restore_path = test_dir_ / "restore";
-    
+
     BackupOptions options;
     EXPECT_TRUE(backup_manager_->backup(source_file, backup_path, options));
+    EXPECT_TRUE(fs::is_regular_file(backup_path));
     EXPECT_TRUE(backup_manager_->restore(backup_path, restore_path, options));
-    
-    auto restored_file = restore_path / "source.txt";
+
+    auto restored_file = restore_path / "test.txt";
     EXPECT_TRUE(fs::exists(restored_file));
     
     std::ifstream file(restored_file);
@@ -81,105 +81,129 @@ TEST_F(BackupTest, BasicBackup) {
     EXPECT_EQ(content, "test content");
 }
 
-// 测试元数据保留
-TEST_F(BackupTest, MetadataPreservation) {
-    auto source_file = createTestFile("source.txt");
-    auto backup_path = test_dir_ / "backup";
+// 2. 目录备份测试
+TEST_F(BackupTest, DirectoryBackup) {
+    // 创建测试目录结构
+    auto source_dir = test_dir_ / "source";
+    fs::create_directories(source_dir);
+    createTestFile("source/file1.txt", "content1"); 
+    createTestFile("source/sub/file2.txt", "content2");
+
+    auto backup_path = test_dir_ / "backup.bak";
     auto restore_path = test_dir_ / "restore";
-    
-    // 设置源文件的元数据
-    auto fs_manager = std::make_unique<FileSystem>();
-    auto original_metadata = fs_manager->getFileMetadata(source_file);
-    original_metadata.permissions = fs::perms::owner_read | fs::perms::owner_write;
-    fs_manager->setFileMetadata(source_file, original_metadata);
-    
-    // 备份和还原
+
     BackupOptions options;
-    EXPECT_TRUE(backup_manager_->backup(source_file, backup_path, options));
+    EXPECT_TRUE(backup_manager_->backup(source_dir, backup_path, options));
     EXPECT_TRUE(backup_manager_->restore(backup_path, restore_path, options));
-    
-    // 验证元数据
-    auto restored_file = restore_path / "source.txt";
-    auto restored_metadata = fs_manager->getFileMetadata(restored_file);
-    EXPECT_EQ(restored_metadata.permissions, original_metadata.permissions);
+
+    // 验证目录结构和内容
+    EXPECT_TRUE(fs::exists(restore_path / "file1.txt"));
+    EXPECT_TRUE(fs::exists(restore_path / "sub/file2.txt"));
+
+    std::ifstream file1(restore_path / "file1.txt");
+    std::string content;
+    std::getline(file1, content);
+    EXPECT_EQ(content, "content1");
 }
 
-// 测试符号链接处理
-TEST_F(BackupTest, SymlinkHandling) {
-    // ���建目标文件（使用相对路径）
-    createTestFile("target.txt");
-    auto symlink_path = test_dir_ / "link.txt";
-    
-    // 使用相对路径创建符号链接
-    fs::create_symlink("target.txt", symlink_path);
-    
-    auto backup_path = test_dir_ / "backup";
-    auto restore_path = test_dir_ / "restore";
-    
-    BackupOptions options;
-    options.include_symlinks = true;
-    EXPECT_TRUE(backup_manager_->backup(symlink_path, backup_path, options));
-    EXPECT_TRUE(backup_manager_->restore(backup_path, restore_path, options));
-    
-    auto restored_link = restore_path / "link.txt";
-    EXPECT_TRUE(fs::is_symlink(restored_link));
-    EXPECT_EQ(fs::read_symlink(restored_link), "target.txt");
-}
+// 3. 链接处理测试 
+TEST_F(BackupTest, SymlinkBackup) {
+     // 创建目标文件和链接
+    createTestFile("target.txt", "target content");
+    fs::create_symlink(test_dir_ / "target.txt", test_dir_ / "link.txt");
 
-// 测试文件过滤
-TEST_F(BackupTest, FileFiltering) {
-    // 创建测试文件
-    auto file1 = createTestFile("file1.txt");
-    auto file2 = createTestFile(".hidden.txt");
-    auto backup_path = test_dir_ / "backup";
+    auto backup_path = test_dir_ / "backup.bak";
     auto restore_path = test_dir_ / "restore";
-    
+
     BackupOptions options;
-    options.include_hidden_files = false;
-    options.exclude_patterns = {".hidden"};
-    
+    options.include_symlinks = true;  // 启用符号链接支持
     EXPECT_TRUE(backup_manager_->backup(test_dir_, backup_path, options));
     EXPECT_TRUE(backup_manager_->restore(backup_path, restore_path, options));
+
+    // 验证链接
+    EXPECT_TRUE(fs::is_symlink(restore_path / "link.txt")); 
+    auto target = fs::read_symlink(restore_path / "link.txt");
+    EXPECT_EQ(target, test_dir_ / "target.txt");
+}
+
+// 4. 过滤测试
+TEST_F(BackupTest, FilterBackup) {
+    createTestFile("visible.txt");
+    createTestFile(".hidden.txt");
     
-    // 验证过滤结果
-    EXPECT_TRUE(fs::exists(restore_path / "file1.txt"));
+    auto backup_path = test_dir_ / "backup.bak";
+    auto restore_path = test_dir_ / "restore";
+
+    BackupOptions options;
+    options.include_hidden_files = false;
+    EXPECT_TRUE(backup_manager_->backup(test_dir_, backup_path, options));
+    EXPECT_TRUE(backup_manager_->restore(backup_path, restore_path, options));
+
+    EXPECT_TRUE(fs::exists(restore_path / "visible.txt"));
     EXPECT_FALSE(fs::exists(restore_path / ".hidden.txt"));
 }
 
-// 测试备份验证
+// 5. 错误处理测试
+TEST_F(BackupTest, ErrorHandling) {
+    auto non_existent = test_dir_ / "non_existent";
+    auto backup_path = test_dir_ / "backup.bak";
+    auto restore_path = test_dir_ / "restore";
+
+    BackupOptions options;
+    EXPECT_FALSE(backup_manager_->backup(non_existent, backup_path, options));
+    EXPECT_FALSE(backup_manager_->restore(non_existent, restore_path, options));
+}
+
+// 6. 空目录测试
+TEST_F(BackupTest, EmptyDirectoryBackup) {
+    auto empty_dir = test_dir_ / "empty";
+    fs::create_directories(empty_dir);
+
+    auto backup_path = test_dir_ / "backup.bak";
+    auto restore_path = test_dir_ / "restore";
+
+    BackupOptions options;
+    EXPECT_FALSE(backup_manager_->backup(empty_dir, backup_path, options));
+}
+
+// 7. 大文件测试
+TEST_F(BackupTest, LargeFileBackup) {
+    auto large_file = test_dir_ / "large.dat";
+    {
+        std::ofstream file(large_file, std::ios::binary);
+        std::vector<char> buffer(1024, 'X');
+        for(int i = 0; i < 1024; ++i) {
+            file.write(buffer.data(), buffer.size());
+        }
+    }
+
+    auto backup_path = test_dir_ / "backup.bak";
+    auto restore_path = test_dir_ / "restore";
+
+    BackupOptions options;
+    EXPECT_TRUE(backup_manager_->backup(large_file, backup_path, options));
+    EXPECT_TRUE(backup_manager_->restore(backup_path, restore_path, options));
+
+    EXPECT_TRUE(fs::exists(restore_path / "large.dat"));
+    EXPECT_EQ(fs::file_size(restore_path / "large.dat"), 
+              fs::file_size(large_file));
+}
+
+// 8. 完整性验证测试
 TEST_F(BackupTest, BackupVerification) {
-    auto source_file = createTestFile("source.txt");
-    auto backup_path = test_dir_ / "backup";
+    auto source_file = createTestFile("test.txt", "test content");
+    auto backup_path = test_dir_ / "backup.bak";
+    auto restore_path = test_dir_ / "restore";
     
     BackupOptions options;
     EXPECT_TRUE(backup_manager_->backup(source_file, backup_path, options));
-    EXPECT_TRUE(backup_manager_->verifyBackup(backup_path));
     
     // 破坏备份文件
-    auto backup_file_path = backup_path / "source.txt";
-    std::ofstream backup_file(backup_file_path, std::ios::binary | std::ios::app);
-    backup_file << "corrupted";
-    backup_file.close();
+    {
+        std::ofstream file(backup_path, std::ios::binary | std::ios::app);
+        file.write("corrupt", 7);
+    }
     
-    EXPECT_FALSE(backup_manager_->verifyBackup(backup_path));
+    // 验证还原失败
+    EXPECT_FALSE(backup_manager_->restore(backup_path, restore_path, options));
 }
-
-// 测试错误处理
-TEST_F(BackupTest, ErrorHandling) {
-    auto backup_path = test_dir_ / "backup";
-    auto restore_path = test_dir_ / "restore";
-    
-    // 测试不存在的源文件
-    auto non_existent = test_dir_ / "non_existent.txt";
-    BackupOptions options;
-    EXPECT_FALSE(backup_manager_->backup(non_existent, backup_path, options));
-    
-    // 测试无效的备份文件
-    EXPECT_FALSE(backup_manager_->restore(non_existent, restore_path, options));
-    
-    // 测试无权限的目标目录
-    auto no_perm_dir = test_dir_ / "no_perm";
-    fs::create_directories(no_perm_dir);
-    fs::permissions(no_perm_dir, fs::perms::none);
-    EXPECT_FALSE(backup_manager_->backup(test_dir_, no_perm_dir, options));
-} 

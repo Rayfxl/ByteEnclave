@@ -44,7 +44,7 @@ protected:
                      const BackupOptions& options);
     
     uint32_t calculateExpectedChecksum(const fs::path& path);
-    
+    uint64_t calculateRequiredSpace(const fs::path& path);
 private:
     std::unique_ptr<FileSystem> fs_;
 };

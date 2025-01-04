@@ -201,7 +201,7 @@ void Encryptor::setIV(const std::vector<uint8_t>& iv) {
         throw std::invalid_argument("Invalid IV size");
     }
     iv_ = iv;
-    iv_set_ = true;  // 设置标志，表示 IV 已经被设置
+    iv_set_ = true;
 }
 
 bool Encryptor::deriveKey(const std::string& password,
@@ -215,6 +215,102 @@ bool Encryptor::deriveKey(const std::string& password,
                             EVP_sha256(),
                             key.size(),
                             key.data()) == 1;
+}
+
+bool Encryptor::encrypt(const std::filesystem::path& input_path,
+                       const std::filesystem::path& output_path,
+                       const std::string& password) {
+    try {
+        // 读取输入文件
+        std::ifstream input(input_path, std::ios::binary);
+        if (!input) {
+            return false;
+        }
+
+        // 读取文件内容
+        std::vector<uint8_t> data;
+        input.seekg(0, std::ios::end);
+        size_t size = input.tellg();
+        input.seekg(0, std::ios::beg);
+        data.resize(size);
+        input.read(reinterpret_cast<char*>(data.data()), size);
+        input.close();
+
+        // 初始化加密器
+        if (!initialize(password)) {
+            return false;
+        }
+
+        // 加密数据
+        std::vector<uint8_t> encrypted_data = encrypt(data);
+
+        // 写入输出文件
+        std::ofstream output(output_path, std::ios::binary);
+        if (!output) {
+            return false;
+        }
+
+        // 写入盐值
+        output.write(reinterpret_cast<const char*>(salt_.data()), salt_.size());
+
+        // 写入加密数据
+        output.write(reinterpret_cast<const char*>(encrypted_data.data()),
+                    encrypted_data.size());
+
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+bool Encryptor::decrypt(const std::filesystem::path& input_path,
+                       const std::filesystem::path& output_path,
+                       const std::string& password) {
+    try {
+        // 读取输入文件
+        std::ifstream input(input_path, std::ios::binary);
+        if (!input) {
+            return false;
+        }
+
+        // 读取盐值
+        std::vector<uint8_t> salt(SALT_SIZE);
+        input.read(reinterpret_cast<char*>(salt.data()), SALT_SIZE);
+        if (!input) {
+            return false;
+        }
+
+        // 读取加密数据
+        std::vector<uint8_t> encrypted_data;
+        input.seekg(0, std::ios::end);
+        auto file_size = static_cast<size_t>(input.tellg());
+        size_t size = file_size - SALT_SIZE;
+        input.seekg(SALT_SIZE, std::ios::beg);
+        encrypted_data.resize(size);
+        input.read(reinterpret_cast<char*>(encrypted_data.data()), size);
+        input.close();
+
+        // 初始化加密器
+        if (!initialize(password, salt)) {
+            return false;
+        }
+
+        // 解密数据
+        std::vector<uint8_t> decrypted_data = decrypt(encrypted_data);
+
+        // 写入输出文件
+        std::ofstream output(output_path, std::ios::binary);
+        if (!output) {
+            return false;
+        }
+
+        output.write(reinterpret_cast<const char*>(decrypted_data.data()),
+                    decrypted_data.size());
+
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
 }
 
 } // namespace byte_enclave 

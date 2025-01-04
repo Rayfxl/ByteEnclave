@@ -16,10 +16,17 @@ struct PackageHeader {
 };
 
 struct FileHeader {
+    enum class Type : uint8_t {
+        Regular = 0,
+        Symlink = 1 
+    };
+
+    Type type;
     std::string path;        // 相对路径
     uint64_t size;          // 文件大小
     uint64_t offset;        // 在包中的偏移
     uint32_t checksum;      // 校验和
+    std::string link_target;
 };
 
 class Packer {
