@@ -1,5 +1,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/stl/filesystem.h>
 #include "backup.hpp"
 #include "packer.hpp"
 #include "compressor.hpp"

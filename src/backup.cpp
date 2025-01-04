@@ -20,17 +20,34 @@ bool BackupManager::backup(const fs::path& source_path,
                          const BackupOptions& options) {
     try {
         // 1. 基本检查
+        std::cout << "[DEBUG] 检查源路径: " << source_path << std::endl;
         if (!fs::exists(source_path)) {
+            std::cout << "[DEBUG] 源路径不存在" << std::endl;
             return false;
         }
 
-        // 2. 检查目标空间
-        auto space = fs::space(backup_path.parent_path());
-        if (space.available < calculateRequiredSpace(source_path)) {
+        // 2. 构造备份文件路径
+        fs::path actual_backup_path = backup_path;
+        if (fs::is_directory(backup_path)) {
+            // 如果目标是目录，在目录下创建备份文件
+            std::string backup_name = source_path.filename().string() + ".backup";
+            actual_backup_path = backup_path / backup_name;
+            std::cout << "[DEBUG] 目标是目录，实际备份文件路径: " << actual_backup_path << std::endl;
+        }
+
+        // 3. 检查目标空间
+        std::cout << "[DEBUG] 检查目标空间" << std::endl;
+        auto space = fs::space(actual_backup_path.parent_path());
+        auto required = calculateRequiredSpace(source_path);
+        std::cout << "[DEBUG] 可用空间: " << space.available << " 字节" << std::endl;
+        std::cout << "[DEBUG] 需要空间: " << required << " 字节" << std::endl;
+        if (space.available < required) {
+            std::cout << "[DEBUG] 空间不足" << std::endl;
             return false;
         }
 
-        // 3. 收集要备份的文件
+        // 4. 收集要备份的文件
+        std::cout << "[DEBUG] 开始收集文件" << std::endl;
         std::vector<fs::path> files_to_backup;
         if (fs::is_directory(source_path)) {
             collectFiles(source_path, files_to_backup, options);
@@ -39,53 +56,72 @@ bool BackupManager::backup(const fs::path& source_path,
         }
 
         if (files_to_backup.empty()) {
+            std::cout << "[DEBUG] 没有找到要备份的文件" << std::endl;
             return false;
         }
+        std::cout << "[DEBUG] 找到 " << files_to_backup.size() << " 个文件:" << std::endl;
+        for (const auto& f : files_to_backup) {
+            std::cout << "  - " << f << std::endl;
+        }
 
-        // 4. 创建临时文件
-        auto temp_pack = backup_path.string() + ".pack.tmp";
-        auto temp_compressed = backup_path.string() + ".gz.tmp";
-        auto temp_encrypted = backup_path.string() + ".enc.tmp";
+        // 5. 创建临时文件
+        std::cout << "[DEBUG] 创建临时文件" << std::endl;
+        auto temp_pack = actual_backup_path.string() + ".pack.tmp";
+        auto temp_compressed = actual_backup_path.string() + ".gz.tmp";
+        auto temp_encrypted = actual_backup_path.string() + ".enc.tmp";
         
         auto cleanup = [&]() {
-            fs::remove(temp_pack);
-            fs::remove(temp_compressed);
-            fs::remove(temp_encrypted);
+            if (fs::exists(temp_pack)) fs::remove(temp_pack);
+            if (fs::exists(temp_compressed)) fs::remove(temp_compressed);
+            if (fs::exists(temp_encrypted)) fs::remove(temp_encrypted);
         };
 
         try {
-            // 5. 打包文件
+            // 6. 打包文件
+            std::cout << "[DEBUG] 开始打包文件" << std::endl;
             if (!packer_->pack(files_to_backup, temp_pack)) {
+                std::cout << "[DEBUG] 打包失败" << std::endl;
                 cleanup();
                 return false;
             }
+            std::cout << "[DEBUG] 打包完成" << std::endl;
 
-            // 6. 压缩文件
+            // 7. 压缩文件
+            std::cout << "[DEBUG] 开始压缩文件" << std::endl;
             if (!compressor_->compress(temp_pack, temp_compressed)) {
+                std::cout << "[DEBUG] 压缩失败" << std::endl;
                 cleanup();
                 return false;
             }
+            std::cout << "[DEBUG] 压缩完成" << std::endl;
 
-            // 7. 加密文件
+            // 8. 加密文件
             if (!options.password.empty()) {
+                std::cout << "[DEBUG] 开始加密文件" << std::endl;
                 if (!encryptor_->encrypt(temp_compressed, temp_encrypted, options.password)) {
+                    std::cout << "[DEBUG] 加密失败" << std::endl;
                     cleanup();
                     return false;
                 }
+                std::cout << "[DEBUG] 加密完成" << std::endl;
                 // 原子性替换
-                fs::rename(temp_encrypted, backup_path);
+                fs::rename(temp_encrypted, actual_backup_path);
             } else {
+                std::cout << "[DEBUG] 不需要加密" << std::endl;
                 // 如果没有密码，直接使用压缩文件
-                fs::rename(temp_compressed, backup_path);
+                fs::rename(temp_compressed, actual_backup_path);
             }
 
             cleanup();
+            std::cout << "[DEBUG] 备份完成" << std::endl;
             return true;
-        } catch (...) {
+        } catch (const std::exception& e) {
+            std::cout << "[DEBUG] 发生异常: " << e.what() << std::endl;
             cleanup();
             return false;
         }
-    } catch (...) {
+    } catch (const std::exception& e) {
+        std::cout << "[DEBUG] 外层异常: " << e.what() << std::endl;
         return false;
     }
 }
@@ -260,37 +296,51 @@ bool BackupManager::verifyBackup(const fs::path& backup_path, const BackupOption
     }
 }
 
-void BackupManager::collectFiles(const fs::path& dir,
-                               std::vector<fs::path>& files,
-                               const BackupOptions& options) {
+void BackupManager::collectFiles(const fs::path& dir_path,
+                              std::vector<fs::path>& files,
+                              const BackupOptions& options) {
     try {
-        for (const auto& entry : fs::recursive_directory_iterator(dir)) {
+        std::cout << "[DEBUG] 扫描目录: " << dir_path << std::endl;
+        std::vector<fs::directory_entry> entries;
+        
+        // 首先收集所有条目
+        for (const auto& entry : fs::recursive_directory_iterator(dir_path)) {
+            entries.push_back(entry);
+        }
+        
+        // 然后处理每个条目
+        for (const auto& entry : entries) {
             const auto& path = entry.path();
+            std::string filename = path.filename().string();
+            bool is_hidden = filename.front() == '.';
             
-            // 跳过隐藏文件
-            if (!options.include_hidden_files && 
-                path.filename().string()[0] == '.') {
+            // 检查是否包含隐藏文件
+            if (is_hidden && !options.include_hidden_files) {
+                std::cout << "[DEBUG] 跳过隐藏文件: " << path << std::endl;
                 continue;
             }
             
             // 检查排除模式
             bool should_exclude = false;
             for (const auto& pattern : options.exclude_patterns) {
-                if (path.string().find(pattern) != std::string::npos) {
+                if (filename.find(pattern) != std::string::npos) {
                     should_exclude = true;
                     break;
                 }
             }
             
-            if (should_exclude) continue;
+            if (should_exclude) {
+                std::cout << "[DEBUG] 跳过排除的文件: " << path << std::endl;
+                continue;
+            }
             
-            // 只收集常规文件
             if (fs::is_regular_file(path)) {
+                std::cout << "[DEBUG] 添加文件: " << path << std::endl;
                 files.push_back(path);
             }
         }
-    } catch (...) {
-        files.clear();
+    } catch (const std::exception& e) {
+        std::cout << "[DEBUG] 收集文件时发生错误: " << e.what() << std::endl;
     }
 }
 
