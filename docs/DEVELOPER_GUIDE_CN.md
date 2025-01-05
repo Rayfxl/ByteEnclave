@@ -31,6 +31,8 @@ sudo apt install make
     --add-binary "lib/byte_enclave_python.cpython-310-x86_64-linux-gnu.so:."\
        --hidden-import "byte_enclave_python"   --paths "lib"   gui/main.py
 
+子模块初始化命令：git submodule update --init
+
 3rd-party：项目所使用的第三方库。
 dist：可执行文件。
 docs：用户及开发文档。
