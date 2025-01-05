@@ -21,3 +21,19 @@ sudo apt install make
 - `make`/`make build`: 构建整个项目;
 - `make test-cpp`: 构建项目后执行测例;
 - `make clean`：清理生成文件
+
+构建之后生成的动态库放入了主目录下的lib目录下，方便用pyinstaller打包。
+
+若要继续开发，需先写好C++代码，再将接口通过pybind11绑定，最后在python前端中使用。
+
+本项目最后打包生成的可执行文件适用于linux。
+
+3rd-party：项目所使用的第三方库。
+dist：可执行文件。
+docs：用户及开发文档。
+gui：前端。
+include：头文件。
+lib：库文件。
+scripts：脚本文件。
+src：源文件。
+test：测试文件。
