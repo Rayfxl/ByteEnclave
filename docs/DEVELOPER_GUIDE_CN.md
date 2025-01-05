@@ -26,7 +26,10 @@ sudo apt install make
 
 若要继续开发，需先写好C++代码，再将接口通过pybind11绑定，最后在python前端中使用。
 
-本项目最后打包生成的可执行文件适用于linux。
+本项目最后打包生成的可执行文件适用于linux。打包命令：
+ pyinstaller   --onefile   --name ByteEnclave\
+    --add-binary "lib/byte_enclave_python.cpython-310-x86_64-linux-gnu.so:."\
+       --hidden-import "byte_enclave_python"   --paths "lib"   gui/main.py
 
 3rd-party：项目所使用的第三方库。
 dist：可执行文件。
