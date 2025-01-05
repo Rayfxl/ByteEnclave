@@ -1,41 +1,38 @@
-#ifndef BYTE_ENCLAVE_COMPRESSOR_HPP
-#define BYTE_ENCLAVE_COMPRESSOR_HPP
+#pragma once
 
 #include <vector>
+#include <string>
 #include <cstdint>
-#include <cstddef>
 
 namespace byte_enclave {
 
-class Compressor {
-public:
-    Compressor();
+// LZ77匹配结构
+struct LZ77Match {
+    size_t distance;  // 距离
+    size_t length;    // 长度
+    uint8_t next_char; // 下一个字符
 
-    /**
-     * @brief 压缩数据
-     * @param data 要压缩的数据
-     * @return 压缩后的数据
-     * @throw std::runtime_error 如果压缩失败
-     */
-    std::vector<uint8_t> compress(const std::vector<uint8_t>& data);
-
-    /**
-     * @brief 解压数据
-     * @param compressed_data 要解压的数据
-     * @return 解压后的数据
-     * @throw std::runtime_error 如果解压失败或数据无效
-     */
-    std::vector<uint8_t> decompress(const std::vector<uint8_t>& compressed_data);
-
-    /**
-     * @brief 获取压缩比率
-     * @param original_size 原始数据大小
-     * @param compressed_size 压缩后数据大小
-     * @return 压缩比率（原始大小/压缩后大小）
-     */
-    double getCompressionRatio(size_t original_size, size_t compressed_size) const;
+    LZ77Match(size_t d = 0, size_t l = 0, uint8_t c = 0)
+        : distance(d), length(l), next_char(c) {}
 };
 
-} // namespace byte_enclave
+class Compressor {
+public:
+    // 压缩文件
+    bool compress(const std::string& input_path, const std::string& output_path);
+    
+    // 解压缩文件
+    bool decompress(const std::string& input_path, const std::string& output_path);
 
-#endif // BYTE_ENCLAVE_COMPRESSOR_HPP 
+private:
+    // LZ77算法参数
+    static constexpr size_t WINDOW_SIZE = 4096;      // 滑动窗口大小
+    static constexpr size_t LOOKAHEAD_SIZE = 16;     // 前向缓冲区大小
+    static constexpr size_t MIN_MATCH_LENGTH = 3;    // 最小匹配长度
+
+    // LZ77压缩和解压缩
+    std::vector<LZ77Match> lz77_compress(const std::vector<uint8_t>& data);
+    std::vector<uint8_t> lz77_decompress(const std::vector<LZ77Match>& matches);
+};
+
+} // namespace byte_enclave 

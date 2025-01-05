@@ -6,6 +6,7 @@
 #include <openssl/evp.h>
 #include <openssl/aes.h>
 #include <openssl/rand.h>
+#include <filesystem>
 
 namespace byte_enclave {
 
@@ -27,6 +28,16 @@ public:
 
     // 解密数据
     std::vector<uint8_t> decrypt(const std::vector<uint8_t>& encrypted_data);
+
+    // 加密文件
+    bool encrypt(const std::filesystem::path& input_path,
+                const std::filesystem::path& output_path,
+                const std::string& password);
+
+    // 解密文件
+    bool decrypt(const std::filesystem::path& input_path,
+                const std::filesystem::path& output_path,
+                const std::string& password);
 
     // 生成随机IV
     std::vector<uint8_t> generateIV();

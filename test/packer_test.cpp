@@ -26,6 +26,7 @@ protected:
     // 创建测试文件
     fs::path createTestFile(const std::string& name, const std::string& content = "test") {
         fs::path file_path = test_dir_ / name;
+        fs::create_directories(file_path.parent_path());
         std::ofstream file(file_path, std::ios::binary);
         file << content;
         file.close();
@@ -67,6 +68,7 @@ TEST_F(PackerTest, PackSingleFile) {
     
     EXPECT_TRUE(packer_->pack({src_path}, pack_path));
     EXPECT_TRUE(fs::exists(pack_path));
+    EXPECT_GT(fs::file_size(pack_path), 0);
 }
 
 // 测试打包多个文件
@@ -77,20 +79,31 @@ TEST_F(PackerTest, PackMultipleFiles) {
     
     EXPECT_TRUE(packer_->pack({file1, file2}, pack_path));
     EXPECT_TRUE(fs::exists(pack_path));
-}
-
-// 测试解包文件
-TEST_F(PackerTest, UnpackFiles) {
-    auto src_path = createTestFile("source.txt", "test content");
-    auto pack_path = test_dir_ / "test.pack";
-    auto extract_dir = test_dir_ / "extract";
     
-    EXPECT_TRUE(packer_->pack({src_path}, pack_path));
+    auto extract_dir = test_dir_ / "extract";
     EXPECT_TRUE(packer_->unpack(pack_path, extract_dir));
     
-    auto extracted_file = extract_dir / "source.txt";
-    EXPECT_TRUE(fs::exists(extracted_file));
-    EXPECT_TRUE(compareFiles(src_path, extracted_file));
+    EXPECT_TRUE(fs::exists(extract_dir / "file1.txt"));
+    EXPECT_TRUE(fs::exists(extract_dir / "file2.txt"));
+    EXPECT_TRUE(compareFiles(file1, extract_dir / "file1.txt"));
+    EXPECT_TRUE(compareFiles(file2, extract_dir / "file2.txt"));
+}
+
+// 测试打包目录结构
+TEST_F(PackerTest, PackDirectoryStructure) {
+    auto file1 = createTestFile("file1.txt", "content1");
+    auto file2 = createTestFile("subdir/file2.txt", "content2");
+    auto pack_path = test_dir_ / "test.pack";
+    auto extract_dir = test_dir_ / "extract";
+
+    std::vector<fs::path> files_to_pack = {file1, file2};
+    EXPECT_TRUE(packer_->pack(files_to_pack, pack_path));
+    EXPECT_TRUE(packer_->unpack(pack_path, extract_dir));
+
+    EXPECT_TRUE(fs::exists(extract_dir / "file1.txt"));
+    EXPECT_TRUE(fs::exists(extract_dir / "subdir/file2.txt"));
+    EXPECT_TRUE(compareFiles(file1, extract_dir / "file1.txt"));
+    EXPECT_TRUE(compareFiles(file2, extract_dir / "subdir/file2.txt"));
 }
 
 // 测试提取单个文件
@@ -110,19 +123,16 @@ TEST_F(PackerTest, ChecksumVerification) {
     auto pack_path = test_dir_ / "test.pack";
     
     EXPECT_TRUE(packer_->pack({src_path}, pack_path));
-    
-    // 验证正确的包
     EXPECT_TRUE(packer_->verifyChecksum(pack_path));
     
     // 破坏包文件
     {
-        std::fstream file(pack_path, std::ios::binary | std::ios::in | std::ios::out);
-        file.seekp(sizeof(PackageHeader));  // 跳过包头，修改文件内容部分
-        uint8_t corrupt = 0xFF;
-        file.write(reinterpret_cast<char*>(&corrupt), 1);
+        std::ofstream file(pack_path, std::ios::binary | std::ios::in | std::ios::out);
+        file.seekp(-1, std::ios::end);  // 定位到倒数第二个字节
+        char corrupt = 0xFF;
+        file.write(&corrupt, 1);  // 写入一个错误的字节
     }
     
-    // 验证被破坏的包
     EXPECT_FALSE(packer_->verifyChecksum(pack_path));
 }
 
