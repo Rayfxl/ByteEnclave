@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import (
     QListView, QAbstractItemView, QListWidget
 )
 from PyQt5.QtCore import Qt, QDateTime, QThread, pyqtSignal
+from PyQt5.QtCore import QTimer
 
 # 添加运行时路径处理
 if getattr(sys, 'frozen', False):
@@ -143,6 +144,14 @@ class VerifyThread(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.backup_history = []  # 添加备份历史记录
+        self.backup_locations = [
+            os.path.expanduser("~/data"),  # 默认位置 
+            os.path.expanduser("~"),       # 用户目录
+        ]
+        self.is_backup_page = True  # 添加界面状态标识
+        self.is_previewing = False  # 添加预览状态标记
+        self.preview_cache = {}     # 添加预览内容缓存
         # 保持对象引用
         self.backup_manager = byte_enclave_python.BackupManager()
         self.initUI()
@@ -381,50 +390,84 @@ class MainWindow(QMainWindow):
     def refreshBackupList(self):
         """刷新备份文件列表"""
         self.backup_list.clear()
-        # 搜索备份文件
-        backup_dir = os.path.expanduser("~/data")  # 默认备份目录
-        if os.path.exists(backup_dir):
-            for file in os.listdir(backup_dir):
-                # 只显示.backup文件，跳过所有临时文件
-                if file.endswith('.backup') and not file.endswith('.tmp'):
-                    full_path = os.path.join(backup_dir, file)
-                    # 确保不是临时文件
-                    if not any(full_path.endswith(suffix) for suffix in ['.pack.tmp', '.gz.tmp', '.enc.tmp', '.dec.tmp']):
-                        self.backup_list.addItem(full_path)
+        # # 搜索备份文件
+        # backup_dir = os.path.expanduser("~/data")  # 默认备份目录
+       # 遍历所有备份位置
+        for location in self.backup_locations:
+            if os.path.exists(location):
+                for root, _, files in os.walk(location):
+                    for file in files:
+                        if file.endswith('.backup') and not file.endswith('.tmp'):
+                            backup_path = os.path.join(root, file)
+                            self.backup_list.addItem(backup_path)
 
     def onBackupSelected(self):
         """当选择备份文件时更新内容预览"""
         try:
+            # # 检查是否正在处理中
+            # if not self.backup_list.isEnabled():
+            #     return
+            # 防重复点击保护
+            if self.is_previewing:
+                return
+            self.is_previewing = True
+            # 禁用列表
+            self.backup_list.setEnabled(False)
+            self.content_list.clear()
             items = self.backup_list.selectedItems()
             if not items:
                 return
             
             backup_path = items[0].text()
+             # 检查缓存
+            if backup_path in self.preview_cache:
+                self.content_list.setPlainText(self.preview_cache[backup_path])
+                return
             if not os.path.exists(backup_path):
                 self.content_list.clear()
                 self.content_list.setPlainText(f'错误: 备份文件不存在: {backup_path}')
                 return
 
-            # 使用已创建的备份管理器
+            # 使用新的备份管理器实例
+            backup_manager = None
             try:
+                backup_manager = byte_enclave_python.BackupManager()
                 # 先尝试不带密码读取
                 options = byte_enclave_python.BackupOptions()
-                contents = self.backup_manager.list_backup_contents(backup_path, options)
+                contents = backup_manager.list_backup_contents(backup_path, options)
                 if contents:
                     # 显示内容
                     self.content_list.clear()
-                    self.content_list.setPlainText('备份文件内容:\n' + '-' * 40 + '\n')
+                    content_text = '备份文件内容:\n' + '-' * 40 + '\n'
                     for item in contents:
-                        self.content_list.append(str(item))
+                        content_text += str(item) + '\n'
+                    self.preview_cache[backup_path] = content_text
+                    self.content_list.setPlainText(content_text)
+                    # self.content_list.setPlainText('备份文件内容:\n' + '-' * 40 + '\n')
+                    # for item in contents:
+                    #     self.content_list.append(str(item))
                 else:
                     # 如果内容为空，可能是加密文件
                     self.content_list.clear()
-                    self.content_list.setPlainText('这是一个加密的备份文件\n请在还原时提供正确的密码')
+                    msg = '这是一个加密的备份文件\n请在还原时提供正确的密码'
+                    self.preview_cache[backup_path] = msg
+                    self.content_list.setPlainText(msg)
+                    # self.content_list.setPlainText('这是一个加密的备份文件\n请在还原时提供正确的密码')
+                
+                # # 清理内存
+                # del contents
+                # del backup_manager
             except Exception as e:
                 # 读取失败，说明是加密文件
                 self.content_list.clear()
-                self.content_list.setPlainText('这是一个加密的备份文件\n请在还原时提供正确的密码')
+                msg = '这是一个加密的备份文件\n请在还原时提供正确的密码'
+                self.preview_cache[backup_path] = msg
+                self.content_list.setPlainText(msg)
                 print(f'读取备份内容时出错: {str(e)}')
+            finally:
+                # 清理资源
+                if backup_manager:
+                    del backup_manager
                 
         except Exception as e:
             import traceback
@@ -432,6 +475,11 @@ class MainWindow(QMainWindow):
             print(error_msg)
             self.content_list.clear()
             self.content_list.setPlainText(error_msg)
+        finally:
+             # 重置状态
+            self.is_previewing = False
+            # 延迟启用列表,避免快速点击
+            QTimer.singleShot(500, lambda: self.backup_list.setEnabled(True))
 
     def selectBackupSource(self):
         dialog = QFileDialog(self)
@@ -533,9 +581,20 @@ class MainWindow(QMainWindow):
     def onBackupFinished(self, success, error_msg):
         """备份完成的回调"""
         if success:
+            # 添加新的备份位置
+            target = self.target_path.text()
+            backup_dir = os.path.dirname(target)
+            if backup_dir not in self.backup_locations:
+                self.backup_locations.append(backup_dir)
+            
+            # 刷新列表和更新UI
+            # self.refreshBackupList()
             self.progress_bar.setValue(100)
             self.progress_label.setText('备份完成')
             QMessageBox.information(self, '成功', '备份已完成')
+            #  # 如果在还原页面,刷新列表
+            # if hasattr(self, 'backup_list'):
+            #     self.refreshBackupList()
         else:
             print(error_msg)  # 打印错误信息到控制台
             QMessageBox.critical(self, '错误', error_msg)
@@ -688,6 +747,7 @@ class MainWindow(QMainWindow):
         """切换界面"""
         active_action.setChecked(True)
         other_action.setChecked(False)
+        self.is_backup_page = show_backup
         if show_backup:
             self.showBackupPage()
         else:
